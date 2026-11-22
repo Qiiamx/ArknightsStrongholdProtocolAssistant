@@ -16,6 +16,10 @@ $AppDir = Join-Path $DistRoot "ASPA"
 $WincapExe = Join-Path $BuildDir "wincap\wincap.exe"
 
 if (-not (Test-Path $BuildVenv)) {
+    $cmd = Get-Command $BuildVenv -ErrorAction SilentlyContinue
+    if ($cmd) { $BuildVenv = $cmd.Source }
+}
+if (-not (Test-Path $BuildVenv)) {
     throw "Python not found: $BuildVenv. Create .build-venv or pass -PythonExe."
 }
 
