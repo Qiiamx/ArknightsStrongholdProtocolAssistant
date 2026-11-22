@@ -129,7 +129,7 @@ class SidePanel:
 
         self.edit_btn = tk.Button(
             self.header,
-            text="编辑叠层手",
+            text="设置",
             command=self._open_editor,
             bg=PANEL,
             fg=TEXT,

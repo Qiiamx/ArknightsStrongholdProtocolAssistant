@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from .dialogs import CovenantCheckDialog, dark_scrollbar
 from .game import GameData
+from .paths import load_settings, save_settings, settings_path
 from .stackers import StackerPreset, all_stackers, effective_operator, group_by_tier, tier_roman
 
 BG = "#0c161a"
@@ -39,6 +40,8 @@ class PresetEditor:
         self.path = Path(preset_path)
         self.on_saved = on_saved
         self.data = StackerPreset.load(self.path, game)
+        self.settings = load_settings()
+        self.proxy_var = tk.StringVar(value=str(self.settings.get("proxy") or ""))
         self.stackers = all_stackers(game)
         self.selected = set(self.data.names)
         self.overrides = dict(self.data.overrides)
@@ -46,7 +49,7 @@ class PresetEditor:
         self._query = ""
 
         self.win = tk.Toplevel(parent)
-        self.win.title("ASPA 叠层手名单")
+        self.win.title("ASPA 设置")
         sw, sh = parent.winfo_screenwidth(), parent.winfo_screenheight()
         w, h = min(980, sw - 40), min(780, sh - 60)
         self.win.geometry(f"{w}x{h}+{max(10, (sw - w) // 2)}+{max(10, (sh - h) // 2)}")
@@ -62,7 +65,7 @@ class PresetEditor:
     def _build(self) -> None:
         top = tk.Frame(self.win, bg=BG)
         top.pack(fill="x", padx=12, pady=(10, 4))
-        tk.Label(top, text="叠层手名单", bg=BG, fg=ACCENT, font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
+        tk.Label(top, text="设置", bg=BG, fg=ACCENT, font=("Microsoft YaHei UI", 13, "bold")).pack(side="left")
         tk.Label(top, text=str(self.path), bg=BG, fg=MUTED, font=FONT_SMALL).pack(side="left", padx=12)
 
         tk.Button(
@@ -88,6 +91,24 @@ class PresetEditor:
             text="点击「盟约…」可改该干员的盟约。判定规则：所有大盟约被 ban，或没有大盟约且所有小盟约被 ban，才视为被 ban。",
             bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w", wraplength=900, justify="left",
         ).pack(fill="x", padx=12, pady=(0, 4))
+
+        proxy_box = tk.Frame(self.win, bg=PANEL)
+        proxy_box.pack(fill="x", padx=12, pady=(4, 6))
+        proxy_row = tk.Frame(proxy_box, bg=PANEL)
+        proxy_row.pack(fill="x")
+        tk.Label(proxy_row, text="更新代理", bg=PANEL, fg=TEXT, font=FONT).pack(side="left", padx=(10, 8), pady=6)
+        tk.Entry(
+            proxy_row, textvariable=self.proxy_var, width=44, bg="#0a2024", fg=TEXT,
+            insertbackground=TEXT, relief="flat", bd=4, font=FONT,
+        ).pack(side="left", padx=(0, 8), pady=6)
+        tk.Label(
+            proxy_row, text="留空 = 直连 / 环境变量", bg=PANEL, fg=MUTED, font=FONT_SMALL,
+        ).pack(side="left", pady=6)
+        tk.Label(
+            proxy_box,
+            text=f"保存到 {settings_path()}；这是用户配置，版本更新不会覆盖。",
+            bg=PANEL, fg=MUTED, font=FONT_SMALL, anchor="w", justify="left", wraplength=900,
+        ).pack(fill="x", padx=10, pady=(0, 5))
 
         bar = tk.Frame(self.win, bg=BG)
         bar.pack(fill="x", padx=12, pady=(4, 6))
@@ -256,7 +277,9 @@ class PresetEditor:
             target = preset.save()
             self.data = preset
             self.path = target
-            self.status.configure(text=f"已保存：{target}", fg=MUTED)
+            self.settings["proxy"] = self.proxy_var.get().strip()
+            settings = save_settings(self.settings)
+            self.status.configure(text=f"已保存名单与设置：{settings}", fg=MUTED)
             if self.on_saved:
                 self.on_saved(target)
         except Exception as exc:

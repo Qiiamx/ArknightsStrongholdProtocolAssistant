@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
@@ -31,6 +32,29 @@ def default_preset() -> Path:
         example = DATA_DIR / "presets.example.json"
         if example.exists():
             shutil.copy2(example, path)
+    return path
+
+
+def settings_path() -> Path:
+    """Per-user GUI settings; never replaced by app updates."""
+    ensure_user_dir()
+    return USER_DIR / "settings.json"
+
+
+def load_settings() -> dict:
+    path = settings_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_settings(data: dict) -> Path:
+    path = settings_path()
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
     return path
 
 
