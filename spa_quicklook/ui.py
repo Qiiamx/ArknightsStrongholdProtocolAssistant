@@ -12,7 +12,7 @@ from typing import Any
 
 from .capture import capture_client_area
 from .cli import _to_recognition_dict
-from .dialogs import CovenantCheckDialog, dark_scrollbar
+from .dialogs import dark_scrollbar
 from .game import GameData, Recognition
 from .ocr import OcrEngine
 from .paths import counter_data_path, game_data_path, screenshots_dir
@@ -54,6 +54,7 @@ class SidePanel:
         self.last_rec: dict[str, Any] | None = None
         self.last_rec_dict: dict[str, Any] | None = None
         self.cov_available: dict[str, bool] = {}
+        self.cov_collapsed: set[str] = set()
         self.filter_covs: set[str] = set()
         self.selected_ops: set[str] = set()
         self.updating = False
@@ -149,8 +150,6 @@ class SidePanel:
 
         sub = tk.Frame(outer, bg=BG)
         sub.pack(fill="x", padx=12, pady=(0, 6))
-        self.status = tk.Label(sub, text=f"v{__version__} · 准备就绪", bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w")
-        self.status.pack(side="left", fill="x", expand=True)
         self.preset_label = tk.Label(
             sub,
             text=self.preset_path.name,
@@ -176,6 +175,7 @@ class SidePanel:
         self.canvas.bind(
             "<Configure>", lambda e: self.canvas.itemconfigure(self._content_window, width=e.width)
         )
+        self.root.bind("<MouseWheel>", self._on_wheel, add="+")
         self.info = tk.Label(
             self.content, text="等待截图", bg=PANEL, fg=ACCENT,
             font=("Microsoft YaHei UI", 11, "bold"), anchor="w", justify="left", wraplength=300,
@@ -200,22 +200,18 @@ class SidePanel:
             activebackground=BORDER, activeforeground=TEXT, relief="flat", bd=0,
             font=FONT_SMALL, padx=7, pady=3, cursor="hand2",
         ).pack(side="left", padx=4)
-        self.filter_btn = tk.Button(
-            tools, text="筛选盟约", command=self._edit_filter, bg=BG, fg=ACCENT,
-            activebackground=BORDER, activeforeground=TEXT, relief="flat", bd=0,
-            font=FONT_SMALL, padx=8, pady=3, cursor="hand2",
-        )
-        self.filter_btn.pack(side="left", padx=6)
         self.cov_label = tk.Label(
             self.content, text="", bg=PANEL, fg=MUTED, font=FONT_SMALL,
             anchor="w", justify="left", wraplength=300,
         )
         self.cov_label.pack(fill="x", padx=10, pady=(2, 0))
         self.filter_label = tk.Label(
-            self.content, text="筛选：未选择（默认不显示干员）", bg=PANEL, fg=MUTED,
+            self.content, text="筛选（从未禁用的盟约中选择）", bg=PANEL, fg=MUTED,
             font=FONT_SMALL, anchor="w", justify="left", wraplength=300,
         )
-        self.filter_label.pack(fill="x", padx=10, pady=(0, 2))
+        self.filter_label.pack(fill="x", padx=10, pady=(4, 0))
+        self.filter_frame = tk.Frame(self.content, bg=PANEL)
+        self.filter_frame.pack(fill="x", padx=4, pady=(1, 2))
         self.selected_label = tk.Label(
             self.content, text="已选组合：未勾选", bg=PANEL, fg=OK,
             font=("Microsoft YaHei UI", 10, "bold"), anchor="w", justify="left", wraplength=300,
@@ -276,6 +272,12 @@ class SidePanel:
             cursor="hand2",
         )
         self.update_btn.pack(side="left", padx=(6, 0))
+
+        self.status = tk.Label(
+            outer, text=f"v{__version__} · 准备就绪", bg=BG, fg=MUTED,
+            font=FONT_SMALL, anchor="w", justify="left", wraplength=330,
+        )
+        self.status.pack(fill="x", padx=12, pady=(0, 6))
 
         self._render_initial()
 
@@ -365,6 +367,14 @@ class SidePanel:
                 self._default_geometry()
 
     # -------------------------------------------------------------- content
+    def _on_wheel(self, event) -> str:
+        if event.widget.winfo_toplevel() is not self.root:
+            return ""
+        delta = int(-event.delta / 120) if event.delta else 0
+        if delta:
+            self.canvas.yview_scroll(delta, "units")
+        return "break"
+
     def _major_names(self) -> list[str]:
         return [c.name for c in self.game.majors] if self.game is not None else []
 
@@ -375,13 +385,21 @@ class SidePanel:
         for child in self.cov_frame.winfo_children():
             child.destroy()
         self.cov_vars: dict[str, tk.BooleanVar] = {}
+        self.cov_groups: dict[str, tuple[tk.Frame, tk.Button]] = {}
         if self.game is None:
             return
         for label, names in (("核心盟约", self._major_names()), ("附加盟约", self._minor_names())):
-            tk.Label(
-                self.cov_frame, text=label, bg=PANEL, fg=ACCENT,
-                font=("Microsoft YaHei UI", 10, "bold"), anchor="w",
-            ).pack(fill="x", padx=4, pady=(4, 1))
+            header = tk.Frame(self.cov_frame, bg=PANEL)
+            header.pack(fill="x", padx=2, pady=(4, 0))
+            button = tk.Button(
+                header,
+                text=("▾ " if label not in self.cov_collapsed else "▸ ") + label,
+                command=lambda name=label: self._toggle_cov_group(name),
+                bg=PANEL, fg=ACCENT, activebackground=BORDER, activeforeground=TEXT,
+                relief="flat", bd=0, font=("Microsoft YaHei UI", 10, "bold"),
+                anchor="w", padx=2, pady=1, cursor="hand2",
+            )
+            button.pack(side="left")
             grid = tk.Frame(self.cov_frame, bg=PANEL)
             grid.pack(fill="x", padx=2)
             grid.columnconfigure(0, weight=1)
@@ -404,10 +422,26 @@ class SidePanel:
                     bd=0,
                     highlightthickness=0,
                 ).grid(row=i // 2, column=i % 2, sticky="w", padx=3, pady=0)
+            self.cov_groups[label] = (grid, button)
+            if label in self.cov_collapsed:
+                grid.pack_forget()
+        self._build_filter_options()
+
+    def _toggle_cov_group(self, label: str) -> None:
+        grid, button = self.cov_groups[label]
+        if label in self.cov_collapsed:
+            self.cov_collapsed.discard(label)
+            grid.pack(fill="x", padx=2)
+            button.configure(text="▾ " + label)
+        else:
+            self.cov_collapsed.add(label)
+            grid.pack_forget()
+            button.configure(text="▸ " + label)
 
     def _toggle_cov(self, name: str) -> None:
         self.cov_available[name] = self.cov_vars[name].get()
         self._update_cov_label()
+        self._build_filter_options()
         self._render_ops()
 
     def _set_all_cov(self, value: bool) -> None:
@@ -415,20 +449,61 @@ class SidePanel:
             var.set(value)
             self.cov_available[name] = value
         self._update_cov_label()
+        self._build_filter_options()
         self._render_ops()
 
     def _sync_cov_vars(self) -> None:
         for name, var in self.cov_vars.items():
             var.set(self.cov_available.get(name, False))
 
+    def _build_filter_options(self) -> None:
+        for child in self.filter_frame.winfo_children():
+            child.destroy()
+        self.filter_vars: dict[str, tk.BooleanVar] = {}
+        available = [n for n in self._major_names() + self._minor_names() if self.cov_available.get(n)]
+        self.filter_covs &= set(available)
+        if not available:
+            self.filter_label.configure(text="筛选：先勾选上方可用盟约")
+            return
+        self.filter_label.configure(text="筛选（默认不选，点击平铺项）：")
+        grid = tk.Frame(self.filter_frame, bg=PANEL)
+        grid.pack(fill="x", padx=2)
+        grid.columnconfigure(0, weight=1)
+        grid.columnconfigure(1, weight=1)
+        for i, name in enumerate(available):
+            var = tk.BooleanVar(value=name in self.filter_covs)
+            self.filter_vars[name] = var
+            tk.Checkbutton(
+                grid,
+                text=name,
+                variable=var,
+                command=lambda n=name: self._toggle_filter(n),
+                anchor="w",
+                bg=PANEL,
+                fg=TEXT,
+                activebackground=PANEL,
+                activeforeground=ACCENT,
+                selectcolor="#0a2024",
+                font=FONT_SMALL,
+                bd=0,
+                highlightthickness=0,
+            ).grid(row=i // 2, column=i % 2, sticky="w", padx=3, pady=0)
+
+    def _toggle_filter(self, name: str) -> None:
+        if self.filter_vars[name].get():
+            self.filter_covs.add(name)
+        else:
+            self.filter_covs.discard(name)
+        self._render_ops()
+
     def _render_initial(self) -> None:
         self.info.configure(text="等待截图")
         self.detail.configure(
             text="把游戏停在「确认本局信息」页，点「截图识别」。\n"
-            "没有截图也可以点「调整盟约」「筛选盟约」手动操作。"
+            "没有截图也可以直接勾选上方盟约，再点筛选区的盟约查看干员。"
         )
         self._update_cov_label()
-        self._update_filter_label()
+        self._build_filter_options()
         self._update_selected_label()
         self._clear_ops("先选择盟约筛选，或勾选已选干员。")
 
@@ -450,13 +525,6 @@ class SidePanel:
         ma = sum(1 for n in majors if self.cov_available.get(n))
         mi = sum(1 for n in minors if self.cov_available.get(n))
         self.cov_label.configure(text=f"盟约：大 {ma}/{len(majors)} 可用 · 小 {mi}/{len(minors)} 可用")
-
-    def _update_filter_label(self) -> None:
-        if not self.filter_covs:
-            self.filter_label.configure(text="筛选：未选择（默认不显示干员）", fg=MUTED)
-        else:
-            text = "、".join(sorted(self.filter_covs))
-            self.filter_label.configure(text=f"筛选：{text}", fg=ACCENT)
 
     def _update_selected_label(self) -> None:
         if not self.selected_ops or self.game is None:
@@ -497,24 +565,7 @@ class SidePanel:
                     self.cov_available[name] = False
         self._sync_cov_vars()
         self._update_cov_label()
-        self._render_ops()
-
-    def _edit_filter(self) -> None:
-        if self.game is None:
-            self.status.configure(text="数据未加载，无法筛选", fg=BAD)
-            return
-        dialog = CovenantCheckDialog(
-            self.root,
-            "按盟约筛选",
-            {"核心盟约": self._major_names(), "附加盟约": self._minor_names()},
-            self.filter_covs,
-            "勾选要查看的盟约；默认不选任何盟约，因此不显示干员。已勾选干员始终保留。",
-        )
-        result = dialog.show()
-        if result is None:
-            return
-        self.filter_covs = set(result)
-        self._update_filter_label()
+        self._build_filter_options()
         self._render_ops()
 
     def _toggle_operator(self, name: str, var: tk.BooleanVar) -> None:
