@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
 from .dialogs import CovenantCheckDialog, dark_scrollbar
@@ -81,19 +81,35 @@ class PresetEditor:
             font=FONT_SMALL, padx=10, pady=4, cursor="hand2",
         ).pack(side="right", padx=6)
 
+        self.nb = ttk.Notebook(self.win)
+        style = ttk.Style(self.win)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background=PANEL, foreground=TEXT, padding=(12, 5))
+        style.map("TNotebook.Tab", background=[("selected", BORDER)], foreground=[("selected", ACCENT)])
+        style.configure("TFrame", background=BG)
+        self.nb.pack(fill="both", expand=True, padx=12, pady=(2, 6))
+        self.tab_stack = ttk.Frame(self.nb)
+        self.tab_update = ttk.Frame(self.nb)
+        self.nb.add(self.tab_stack, text="叠层手 / 盟约")
+        self.nb.add(self.tab_update, text="更新")
+
         tk.Label(
-            self.win,
+            self.tab_stack,
             text="勾选本局要关注的叠层手。识别后侧栏只展示名单里没被 ban 的；名单外的干员不会出现。",
             bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w",
-        ).pack(fill="x", padx=12, pady=(0, 4))
+        ).pack(fill="x", padx=12, pady=(8, 4))
         tk.Label(
-            self.win,
-            text="点击「盟约…」可改该干员的盟约。判定规则：所有大盟约被 ban，或没有大盟约且所有小盟约被 ban，才视为被 ban。",
+            self.tab_stack,
+            text="点击干员右侧的盟约内容可修改。判定规则：所有大盟约被 ban，或没有大盟约且所有小盟约被 ban，才视为被 ban。",
             bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w", wraplength=900, justify="left",
         ).pack(fill="x", padx=12, pady=(0, 4))
 
-        proxy_box = tk.Frame(self.win, bg=PANEL)
-        proxy_box.pack(fill="x", padx=12, pady=(4, 6))
+        proxy_box = tk.Frame(self.tab_update, bg=PANEL)
+        proxy_box.pack(fill="x", padx=12, pady=(16, 6))
         proxy_row = tk.Frame(proxy_box, bg=PANEL)
         proxy_row.pack(fill="x")
         tk.Label(proxy_row, text="更新代理", bg=PANEL, fg=TEXT, font=FONT).pack(side="left", padx=(10, 8), pady=6)
@@ -109,8 +125,13 @@ class PresetEditor:
             text=f"保存到 {settings_path()}；这是用户配置，版本更新不会覆盖。",
             bg=PANEL, fg=MUTED, font=FONT_SMALL, anchor="w", justify="left", wraplength=900,
         ).pack(fill="x", padx=10, pady=(0, 5))
+        tk.Label(
+            self.tab_update,
+            text="示例：http://127.0.0.1:7890（Clash / Mihomo 的 HTTP 或 Mixed 端口）",
+            bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w",
+        ).pack(fill="x", padx=22, pady=(6, 0))
 
-        bar = tk.Frame(self.win, bg=BG)
+        bar = tk.Frame(self.tab_stack, bg=BG)
         bar.pack(fill="x", padx=12, pady=(4, 6))
         tk.Label(bar, text="搜索", bg=BG, fg=MUTED, font=FONT_SMALL).pack(side="left")
         self.search_var = tk.StringVar()
@@ -128,7 +149,7 @@ class PresetEditor:
         self.count_label = tk.Label(bar, text="", bg=BG, fg=MUTED, font=FONT_SMALL)
         self.count_label.pack(side="right")
 
-        wrap = tk.Frame(self.win, bg=PANEL)
+        wrap = tk.Frame(self.tab_stack, bg=PANEL)
         wrap.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         canvas = tk.Canvas(wrap, bg=PANEL, highlightthickness=0)
         scroll = dark_scrollbar(wrap, command=canvas.yview)
@@ -145,6 +166,23 @@ class PresetEditor:
 
         self.status = tk.Label(self.win, text="", bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w")
         self.status.pack(fill="x", padx=12, pady=(0, 8))
+
+        self.win.bind("<MouseWheel>", self._on_wheel, add="+")
+        self.win.bind("<Escape>", lambda _e: self.win.focus_set(), add="+")
+        self.win.bind("<Button-1>", self._on_click, add="+")
+        for widget in (self.canvas, self.list_frame, self.tab_stack):
+            widget.bind("<Button-1>", lambda _e: self.win.focus_set(), add="+")
+
+    def _on_click(self, event) -> None:
+        if isinstance(event.widget, (tk.Entry, tk.Text, tk.Spinbox)):
+            return
+        self.win.focus_set()
+
+    def _on_wheel(self, event) -> str:
+        delta = int(-event.delta / 120) if event.delta else 0
+        if delta:
+            self.canvas.yview_scroll(delta, "units")
+        return "break"
 
     def _visible_stackers(self):
         query = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
@@ -164,6 +202,7 @@ class PresetEditor:
         self.vars = {}
         visible = self._visible_stackers()
         groups = group_by_tier(visible)
+        temp_preset = StackerPreset(self.path, [], self.overrides)
         for tier, ops in groups:
             header = tk.Frame(self.list_frame, bg=BG)
             header.pack(fill="x", pady=(8, 2), padx=6)
@@ -176,13 +215,14 @@ class PresetEditor:
             )
             grid = tk.Frame(self.list_frame, bg=PANEL)
             grid.pack(fill="x", padx=6, pady=2)
-            grid.columnconfigure(0, weight=1)
-            grid.columnconfigure(1, weight=1)
+            grid.columnconfigure(0, weight=1, uniform="stacker")
+            grid.columnconfigure(1, weight=1, uniform="stacker")
             for index, op in enumerate(ops):
                 var = tk.BooleanVar(value=op.name in self.selected)
                 self.vars[op.name] = var
-                cell = tk.Frame(grid, bg=PANEL)
+                cell = tk.Frame(grid, bg=PANEL, width=430, height=27)
                 cell.grid(row=index // 2, column=index % 2, sticky="w", padx=6, pady=2)
+                cell.pack_propagate(False)
                 cb = tk.Checkbutton(
                     cell,
                     text=op.name,
@@ -196,13 +236,16 @@ class PresetEditor:
                     activeforeground=ACCENT,
                     selectcolor="#0a2024",
                     font=FONT,
+                    width=16,
                     bd=0,
                     highlightthickness=0,
                 )
                 cb.pack(side="left")
+                effective = effective_operator(self.game, op.name, temp_preset) or op
+                cov_text = "/".join(effective.covenants) or "无盟约"
                 tk.Button(
                     cell,
-                    text="盟约…",
+                    text=cov_text,
                     command=lambda name=op.name: self.edit_covenants(name),
                     bg=BG,
                     fg=ACCENT,
@@ -211,7 +254,8 @@ class PresetEditor:
                     relief="flat",
                     bd=0,
                     font=FONT_SMALL,
-                    padx=5,
+                    anchor="w",
+                    padx=4,
                     pady=0,
                     cursor="hand2",
                 ).pack(side="left", padx=(2, 0))
@@ -244,6 +288,7 @@ class PresetEditor:
         majors = [n for n in result if n in self.game.covenants and self.game.covenants[n].cls == "major"]
         minors = [n for n in result if n in self.game.covenants and self.game.covenants[n].cls == "minor"]
         self.overrides[name] = {"major": majors, "minor": minors}
+        self._refresh()
         self.status.configure(text=f"{name} 的盟约已修改，点保存写入", fg=MUTED)
 
     def _toggle(self, name: str) -> None:

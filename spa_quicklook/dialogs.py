@@ -58,7 +58,19 @@ class CovenantCheckDialog:
 
         self.win = tk.Toplevel(parent)
         self.win.title(title)
-        self.win.geometry("620x680")
+        width, height = 620, 680
+        try:
+            parent.update_idletasks()
+            px, py = parent.winfo_rootx(), parent.winfo_rooty()
+            pw, ph = parent.winfo_width(), parent.winfo_height()
+            x = px + (pw - width) // 2
+            y = py + (ph - height) // 2
+            sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
+            x = max(0, min(x, sw - width - 8))
+            y = max(0, min(y, sh - height - 40))
+        except tk.TclError:
+            x = y = 0
+        self.win.geometry(f"{width}x{height}+{x}+{y}")
         self.win.configure(bg=BG)
         self.win.transient(parent)
         self.win.attributes("-topmost", True)
