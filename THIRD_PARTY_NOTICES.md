@@ -1,6 +1,6 @@
 # Third-party notices
 
-SPA QuickLook bundles or depends on the following projects. Their licenses
+ASPA bundles or depends on the following projects. Their licenses
 apply to their respective files; the project's own code is MIT (see LICENSE).
 
 | Component | License | Use |

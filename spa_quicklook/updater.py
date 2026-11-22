@@ -50,7 +50,7 @@ def _repo() -> str:
 
 
 def _asset_name() -> str:
-    return str(_config().get("asset") or "SPA-QuickLook-win-x64.zip")
+    return str(_config().get("asset") or "ASPA-win-x64.zip")
 
 
 def _opener() -> urllib.request.OpenerDirector:
@@ -80,7 +80,7 @@ def check_latest() -> UpdateInfo | None:
     if not repo:
         return None
     url = f"https://api.github.com/repos/{repo}/releases/latest"
-    req = urllib.request.Request(url, headers={"User-Agent": f"SPA-QuickLook/{__version__}", "Accept": "application/vnd.github+json"})
+    req = urllib.request.Request(url, headers={"User-Agent": f"ASPA/{__version__}", "Accept": "application/vnd.github+json"})
     with _opener().open(req, timeout=15) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     tag = str(data.get("tag_name") or "")
@@ -125,7 +125,7 @@ def download_and_apply(info: UpdateInfo, on_status=None) -> None:
     if on_status:
         on_status("准备重启更新…")
     script = work / "apply_update.cmd"
-    exe = APP_DIR / "SPA-QuickLook.exe"
+    exe = APP_DIR / "ASPA.exe"
     script.write_text(
         "@echo off\r\n"
         "timeout /t 2 /nobreak >nul\r\n"

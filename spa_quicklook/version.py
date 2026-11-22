@@ -11,4 +11,4 @@ try:
 except Exception:
     __version__ = "0.1.0"
 
-APP_NAME = "SPA QuickLook"
+APP_NAME = "ASPA"

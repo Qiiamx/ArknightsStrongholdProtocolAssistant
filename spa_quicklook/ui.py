@@ -80,7 +80,7 @@ class SidePanel:
 
         title = tk.Label(
             self.header,
-            text="SPA 卫戍速查",
+            text="ASPA 卫戍速查",
             bg=BG,
             fg=ACCENT,
             font=FONT_TITLE,

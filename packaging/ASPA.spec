@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller one-dir spec for SPA QuickLook.
+"""PyInstaller one-dir spec for ASPA.
 
 Build prerequisites:
   - .build-venv with pyinstaller + rapidocr_onnxruntime + opencv-python-headless
@@ -59,7 +59,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="SPA-QuickLook",
+    name="ASPA",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -74,5 +74,6 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name="SPA-QuickLook",
+    name="ASPA",
 )
+

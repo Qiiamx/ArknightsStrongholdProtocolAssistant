@@ -1,6 +1,6 @@
 param(
     [string]$Version = "0.1.0",
-    [string]$Repo = "Qiiamx/SPA-QuickLook",
+    [string]$Repo = "Qiiamx/ArknightsStrongholdProtocolAssistant",
     [string]$PythonExe = "",
     [switch]$SkipWincap,
     [switch]$SkipPyInstaller,
@@ -12,7 +12,7 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $BuildVenv = if ($PythonExe) { $PythonExe } else { Join-Path $Root ".build-venv\Scripts\python.exe" }
 $BuildDir = Join-Path $Root "build"
 $DistRoot = if ($OutDir) { $OutDir } else { Join-Path $Root "dist" }
-$AppDir = Join-Path $DistRoot "SPA-QuickLook"
+$AppDir = Join-Path $DistRoot "ASPA"
 $WincapExe = Join-Path $BuildDir "wincap\wincap.exe"
 
 if (-not (Test-Path $BuildVenv)) {
@@ -37,17 +37,17 @@ $versionModule = Join-Path $Root "spa_quicklook\_build_version.py"
 
 # 3. PyInstaller one-dir.
 if (-not $SkipPyInstaller) {
-    Write-Host "[3/5] Building SPA-QuickLook.exe..." -ForegroundColor Cyan
+    Write-Host "[3/5] Building ASPA.exe..." -ForegroundColor Cyan
     $env:WINCAP_EXE = $WincapExe
     Push-Location $Root
     try {
-        & $BuildVenv -m PyInstaller --noconfirm --clean (Join-Path $Root "packaging\SPA-QuickLook.spec") | Out-Null
+        & $BuildVenv -m PyInstaller --noconfirm --clean (Join-Path $Root "packaging\ASPA.spec") | Out-Null
     } finally {
         Pop-Location
     }
 }
-if (-not (Test-Path (Join-Path $AppDir "SPA-QuickLook.exe"))) {
-    throw "PyInstaller output missing: $AppDir\SPA-QuickLook.exe"
+if (-not (Test-Path (Join-Path $AppDir "ASPA.exe"))) {
+    throw "PyInstaller output missing: $AppDir\ASPA.exe"
 }
 
 # 4. Runtime files.
@@ -55,7 +55,7 @@ Write-Host "[4/5] Assembling runtime..." -ForegroundColor Cyan
 Copy-Item $WincapExe (Join-Path $AppDir "wincap.exe") -Force
 $update = @{
     repo = $Repo
-    asset = "SPA-QuickLook-win-x64.zip"
+    asset = "ASPA-win-x64.zip"
     proxy = ""
 } | ConvertTo-Json
 $update | Set-Content -Path (Join-Path $AppDir "update.json") -Encoding utf8
@@ -69,12 +69,13 @@ foreach ($doc in @("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.
 # 5. Zip + checksum.
 Write-Host "[5/5] Packaging zip..." -ForegroundColor Cyan
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-$zip = Join-Path $DistRoot "SPA-QuickLook-win-x64.zip"
+$zip = Join-Path $DistRoot "ASPA-win-x64.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 [System.IO.Compression.ZipFile]::CreateFromDirectory($AppDir, $zip)
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-"$hash  SPA-QuickLook-win-x64.zip" | Set-Content -Path "$zip.sha256" -Encoding ascii
+"$hash  ASPA-win-x64.zip" | Set-Content -Path "$zip.sha256" -Encoding ascii
 
 $sizeMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
 Write-Host "Done: $zip ($sizeMb MB)" -ForegroundColor Green
 Write-Host "SHA256: $hash"
+
