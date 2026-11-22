@@ -62,9 +62,9 @@ $update = @{
     asset = "ASPA-win-x64.zip"
     proxy = ""
 } | ConvertTo-Json
-$update | Set-Content -Path (Join-Path $AppDir "update.json") -Encoding utf8
+[IO.File]::WriteAllText((Join-Path $AppDir "update.json"), $update, (New-Object System.Text.UTF8Encoding($false)))
 $versionInfo = @{ version = $Version; repo = $Repo } | ConvertTo-Json
-$versionInfo | Set-Content -Path (Join-Path $AppDir "version.json") -Encoding utf8
+[IO.File]::WriteAllText((Join-Path $AppDir "version.json"), $versionInfo, (New-Object System.Text.UTF8Encoding($false)))
 foreach ($doc in @("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "CHANGELOG.md")) {
     $src = Join-Path $Root $doc
     if (Test-Path $src) { Copy-Item $src (Join-Path $AppDir $doc) -Force }
