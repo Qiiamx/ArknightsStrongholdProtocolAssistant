@@ -104,6 +104,11 @@ def check_latest() -> UpdateInfo | None:
     )
 
 
+def _ps_quote(value: str) -> str:
+    """Quote a path for a single-quoted PowerShell string."""
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def download_and_apply(info: UpdateInfo, on_status=None) -> None:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("仅发布版支持自动更新")
@@ -124,29 +129,40 @@ def download_and_apply(info: UpdateInfo, on_status=None) -> None:
             raise RuntimeError("更新包 SHA256 不匹配")
     if on_status:
         on_status("准备重启更新…")
-    script = work / "apply_update.cmd"
-    exe = APP_DIR / "ASPA.exe"
+    # Do NOT hand a UTF-8 .cmd to cmd.exe: cmd uses the OEM code page, so a
+    # Chinese user name (e.g. C:\Users\花\...) becomes mojibake and the exe
+    # cannot be found.  A BOM'd .ps1 is read as Unicode by Windows PowerShell.
+    script = work / "apply_update.ps1"
     script.write_text(
-        "@echo off\r\n"
-        "timeout /t 2 /nobreak >nul\r\n"
-        f'set "ZIP={zip_path}"\r\n'
-        f'set "APP={APP_DIR}"\r\n'
-        'set "TMP=%TEMP%\\spa-update-extract"\r\n'
-        'if exist "%TMP%" rmdir /s /q "%TMP%"\r\n'
-        'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%TMP%\' -Force"\r\n'
+        "$ErrorActionPreference = 'Stop'\r\n"
+        "Start-Sleep -Seconds 2\r\n"
+        f"$zip = {_ps_quote(str(zip_path))}\r\n"
+        f"$app = {_ps_quote(str(APP_DIR))}\r\n"
+        "$tmp = Join-Path $env:TEMP ('aspa-update-extract-' + [Guid]::NewGuid().ToString('N'))\r\n"
+        "if (Test-Path -LiteralPath $tmp) { Remove-Item -LiteralPath $tmp -Recurse -Force }\r\n"
+        "Expand-Archive -LiteralPath $zip -DestinationPath $tmp -Force\r\n"
         # Runtime goes to _internal and can be mirrored; root is copied with /E
         # (no /MIR) so user-created presets/logs next to the exe are preserved.
-        'robocopy "%TMP%\\_internal" "%APP%\\_internal" /MIR /NFL /NDL /NJH /NJS /NP >nul\r\n'
-        'robocopy "%TMP%" "%APP%" /E /XD "%TMP%\\_internal" /NFL /NDL /NJH /NJS /NP >nul\r\n'
-        f'start "" "{exe}"\r\n'
-        'rmdir /s /q "%TMP%"\r\n'
-        'del "%ZIP%"\r\n'
-        'del "%~f0"\r\n',
-        encoding="utf-8",
+        "robocopy (Join-Path $tmp '_internal') (Join-Path $app '_internal') /MIR /NFL /NDL /NJH /NJS /NP | Out-Null\r\n"
+        "robocopy $tmp $app /E /XD (Join-Path $tmp '_internal') /NFL /NDL /NJH /NJS /NP | Out-Null\r\n"
+        f"Start-Process -FilePath (Join-Path $app 'ASPA.exe') -WorkingDirectory $app\r\n"
+        "Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue\r\n"
+        "Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue\r\n"
+        "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\r\n",
+        encoding="utf-8-sig",
     )
     flags = 0
-    if hasattr(subprocess, "DETACHED_PROCESS"):
-        flags |= subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-    subprocess.Popen(["cmd", "/c", str(script)], creationflags=flags, close_fds=True)
+    if hasattr(subprocess, "CREATE_NEW_PROCESS_GROUP"):
+        flags |= subprocess.CREATE_NEW_PROCESS_GROUP
+    if hasattr(subprocess, "CREATE_NO_WINDOW"):
+        flags |= subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=flags,
+        close_fds=True,
+    )
     if on_status:
         on_status("即将重启…")
