@@ -11,8 +11,9 @@ from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Any, Callable
 
+from .dialogs import CovenantCheckDialog, dark_scrollbar
 from .game import GameData
-from .stackers import StackerPreset, all_stackers, group_by_tier, tier_roman
+from .stackers import StackerPreset, all_stackers, effective_operator, group_by_tier, tier_roman
 
 BG = "#0c161a"
 PANEL = "#112328"
@@ -40,6 +41,7 @@ class PresetEditor:
         self.data = StackerPreset.load(self.path, game)
         self.stackers = all_stackers(game)
         self.selected = set(self.data.names)
+        self.overrides = dict(self.data.overrides)
         self.vars: dict[str, tk.BooleanVar] = {}
         self._query = ""
 
@@ -81,6 +83,11 @@ class PresetEditor:
             text="勾选本局要关注的叠层手。识别后侧栏只展示名单里没被 ban 的；名单外的干员不会出现。",
             bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w",
         ).pack(fill="x", padx=12, pady=(0, 4))
+        tk.Label(
+            self.win,
+            text="点击「盟约…」可改该干员的盟约。判定规则：所有大盟约被 ban，或没有大盟约且所有小盟约被 ban，才视为被 ban。",
+            bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w", wraplength=900, justify="left",
+        ).pack(fill="x", padx=12, pady=(0, 4))
 
         bar = tk.Frame(self.win, bg=BG)
         bar.pack(fill="x", padx=12, pady=(4, 6))
@@ -103,7 +110,7 @@ class PresetEditor:
         wrap = tk.Frame(self.win, bg=PANEL)
         wrap.pack(fill="both", expand=True, padx=12, pady=(0, 6))
         canvas = tk.Canvas(wrap, bg=PANEL, highlightthickness=0)
-        scroll = tk.Scrollbar(wrap, command=canvas.yview, bg=PANEL, troughcolor=PANEL, bd=0)
+        scroll = dark_scrollbar(wrap, command=canvas.yview)
         canvas.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
@@ -153,10 +160,11 @@ class PresetEditor:
             for index, op in enumerate(ops):
                 var = tk.BooleanVar(value=op.name in self.selected)
                 self.vars[op.name] = var
-                text = f"{op.name}   {'/'.join(op.covenants) or '—'}"
+                cell = tk.Frame(grid, bg=PANEL)
+                cell.grid(row=index // 2, column=index % 2, sticky="w", padx=6, pady=2)
                 cb = tk.Checkbutton(
-                    grid,
-                    text=text,
+                    cell,
+                    text=op.name,
                     variable=var,
                     command=lambda name=op.name: self._toggle(name),
                     anchor="w",
@@ -170,12 +178,52 @@ class PresetEditor:
                     bd=0,
                     highlightthickness=0,
                 )
-                cb.grid(row=index // 2, column=index % 2, sticky="w", padx=6, pady=2)
+                cb.pack(side="left")
+                tk.Button(
+                    cell,
+                    text="盟约…",
+                    command=lambda name=op.name: self.edit_covenants(name),
+                    bg=BG,
+                    fg=ACCENT,
+                    activebackground=BORDER,
+                    activeforeground=TEXT,
+                    relief="flat",
+                    bd=0,
+                    font=FONT_SMALL,
+                    padx=5,
+                    pady=0,
+                    cursor="hand2",
+                ).pack(side="left", padx=(2, 0))
         if not groups:
             tk.Label(
                 self.list_frame, text="没有匹配的叠层手", bg=PANEL, fg=MUTED, font=FONT
             ).pack(anchor="w", padx=12, pady=20)
         self._update_count()
+
+    def edit_covenants(self, name: str) -> None:
+        base = self.game.operators.get(name)
+        if base is None:
+            return
+        temp = StackerPreset(self.path, [], self.overrides)
+        op = effective_operator(self.game, name, temp) or base
+        groups = {
+            "核心盟约": [c.name for c in self.game.majors],
+            "附加盟约": [c.name for c in self.game.minors],
+        }
+        dialog = CovenantCheckDialog(
+            self.win,
+            f"修改「{name}」的盟约",
+            groups,
+            set(op.majors) | set(op.minors),
+            "勾选该干员实际拥有的盟约；这会覆盖内置数据。",
+        )
+        result = dialog.show()
+        if result is None:
+            return
+        majors = [n for n in result if n in self.game.covenants and self.game.covenants[n].cls == "major"]
+        minors = [n for n in result if n in self.game.covenants and self.game.covenants[n].cls == "minor"]
+        self.overrides[name] = {"major": majors, "minor": minors}
+        self.status.configure(text=f"{name} 的盟约已修改，点保存写入", fg=MUTED)
 
     def _toggle(self, name: str) -> None:
         if self.vars[name].get():
@@ -204,7 +252,7 @@ class PresetEditor:
 
     def save(self) -> None:
         try:
-            preset = StackerPreset(self.path, self._names_in_order(), self.data.availability_rule)
+            preset = StackerPreset(self.path, self._names_in_order(), self.overrides)
             target = preset.save()
             self.data = preset
             self.path = target

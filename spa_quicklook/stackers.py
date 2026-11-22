@@ -1,23 +1,25 @@
 """Stacker-list preset and remaining-operator calculation.
 
-The old lineup/scoring logic is intentionally not used by the UI anymore.  A
-preset is just an ordered set of stacking operators ("叠层手"); after a scan we
-filter that set by the inferred ban rules and the user's manual exclusions.
+A preset is just a set of stacking operators plus optional per-operator
+covenant overrides.  After a scan we filter the list with one fixed rule:
+
+    an operator is banned iff
+      - it has majors and ALL majors are banned, or
+      - it has no majors and ALL minors are banned.
 """
 
 from __future__ import annotations
 
 import json
 import shutil
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable
 
-from .game import GameData, Operator, Recognition, banned_operators_by_rule
+from .game import GameData, Operator, Recognition
 
 STACKER_TRAIT = "持续叠加"
 TIER_ROMAN = {1: "Ⅰ", 2: "Ⅱ", 3: "Ⅲ", 4: "Ⅳ", 5: "Ⅴ", 6: "Ⅵ", 7: "Ⅶ"}
-DEFAULT_RULE = "anyCoreBanned"
 
 
 def tier_roman(tier: int) -> str:
@@ -35,7 +37,7 @@ def all_stackers(game: GameData) -> list[Operator]:
 class StackerPreset:
     path: Path
     names: list[str] = field(default_factory=list)
-    availability_rule: str = DEFAULT_RULE
+    overrides: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path, game: GameData) -> "StackerPreset":
@@ -49,12 +51,19 @@ class StackerPreset:
 
         if isinstance(data.get("stackers"), list):
             names = [str(x) for x in data["stackers"] if str(x).strip()]
-            rule = str(data.get("availabilityRule") or data.get("scope", {}).get("availabilityRule") or DEFAULT_RULE)
-            return cls(path, names, rule)
+            overrides: dict[str, dict[str, list[str]]] = {}
+            for name, raw in (data.get("operators") or {}).items():
+                if not isinstance(raw, dict):
+                    continue
+                major = raw.get("major") or raw.get("majors") or []
+                minor = raw.get("minor") or raw.get("minors") or []
+                overrides[str(name)] = {
+                    "major": [str(x) for x in major],
+                    "minor": [str(x) for x in minor],
+                }
+            return cls(path, names, overrides)
 
-        # Old lineup preset: the old data model is intentionally discarded.
-        # Seed the new list with every stacking operator so the panel is useful
-        # immediately; the user can uncheck those they do not care about.
+        # Old lineup preset: discard the old model and seed every stacker.
         return cls(path, [op.name for op in all_stackers(game)])
 
     def save(self, path: Path | None = None) -> Path:
@@ -63,13 +72,38 @@ class StackerPreset:
         if target.exists():
             shutil.copy2(target, target.with_suffix(target.suffix + ".bak"))
         payload = {
-            "schemaVersion": "0.2",
-            "availabilityRule": self.availability_rule,
+            "schemaVersion": "0.3",
             "stackers": self.names,
+            "operators": self.overrides,
         }
         target.write_text(json.dumps(payload, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
         self.path = target
         return target
+
+
+def effective_operator(game: GameData, name: str, preset: StackerPreset) -> Operator | None:
+    op = game.operators.get(name)
+    if op is None:
+        return None
+    override = preset.overrides.get(name)
+    if not override:
+        return op
+    majors = override.get("major")
+    minors = override.get("minor")
+    return replace(
+        op,
+        majors=tuple(majors) if majors is not None else op.majors,
+        minors=tuple(minors) if minors is not None else op.minors,
+    )
+
+
+def operator_available(op: Operator, rec: Recognition) -> bool:
+    """The only ban rule used by the stacker feature."""
+    majors = set(op.majors)
+    minors = set(op.minors)
+    if majors:
+        return bool(majors - rec.major_banned)
+    return bool(minors - rec.minor_banned)
 
 
 def group_by_tier(operators: Iterable[Operator]) -> list[tuple[int, list[Operator]]]:
@@ -83,11 +117,8 @@ def remaining(
     game: GameData,
     rec: Recognition,
     preset: StackerPreset,
-    manual_banned: Iterable[str] = (),
 ) -> tuple[list[Operator], set[str], list[str]]:
     """Return (remaining, inferred_banned_in_preset, unknown_names)."""
-    manual = set(manual_banned)
-    inferred = banned_operators_by_rule(game, rec, preset.availability_rule)
     rows: list[Operator] = []
     banned: set[str] = set()
     unknown: list[str] = []
@@ -96,17 +127,11 @@ def remaining(
         if name in seen:
             continue
         seen.add(name)
-        op = game.operators.get(name)
-        if op is None:
+        op = effective_operator(game, name, preset)
+        if op is None or op.trait_type != STACKER_TRAIT:
             unknown.append(name)
             continue
-        if op.trait_type != STACKER_TRAIT:
-            unknown.append(name)
-            continue
-        if name in manual:
-            banned.add(name)
-            continue
-        if name in inferred:
+        if not operator_available(op, rec):
             banned.add(name)
             continue
         rows.append(op)
