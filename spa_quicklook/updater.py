@@ -134,7 +134,10 @@ def download_and_apply(info: UpdateInfo, on_status=None) -> None:
         'set "TMP=%TEMP%\\spa-update-extract"\r\n'
         'if exist "%TMP%" rmdir /s /q "%TMP%"\r\n'
         'powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath \'%ZIP%\' -DestinationPath \'%TMP%\' -Force"\r\n'
-        'robocopy "%TMP%" "%APP%" /MIR /NFL /NDL /NJH /NJS /NP >nul\r\n'
+        # Runtime goes to _internal and can be mirrored; root is copied with /E
+        # (no /MIR) so user-created presets/logs next to the exe are preserved.
+        'robocopy "%TMP%\\_internal" "%APP%\\_internal" /MIR /NFL /NDL /NJH /NJS /NP >nul\r\n'
+        'robocopy "%TMP%" "%APP%" /E /XD "%TMP%\\_internal" /NFL /NDL /NJH /NJS /NP >nul\r\n'
         f'start "" "{exe}"\r\n'
         'rmdir /s /q "%TMP%"\r\n'
         'del "%ZIP%"\r\n'
