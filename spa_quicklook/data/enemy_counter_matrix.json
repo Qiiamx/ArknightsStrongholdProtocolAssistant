@@ -1,0 +1,190 @@
+{
+  "_meta": {
+    "title": "Enemy tag -> covenant counter/suffer matrix (卫戍协议·规程)",
+    "season": "卫戍协议·规程 序列Ⅰ",
+    "date": "2026-11-22",
+    "confidencePolicy": "This is the WEAKEST-evidenced part of the research. Only the rows tagged confidence=medium are grounded in game text or a named community claim. Everything else is my inference from covenant mechanics and MUST be validated by play. Do not ship these weights as authoritative.",
+    "groundedSources": [
+      "https://prts.wiki/w/卫戍协议·规程/PRTS盟约记录 (covenant effect text — the机制 column is quoted/derived from here)",
+      "https://prts.wiki/w/卫戍协议·规程/PRTS盟约记录 §战术特训敌人 (the 9 tags and their official descriptions)",
+      "https://ngabbs.com/read.php?tid=47953257 (莱塔尼亚 '一键删除频次隐匿致命')",
+      "https://a.9game.cn/mrfz/11575447.html (low-reliability counter hints: 阿戈尔 vs 海怪, element healing)"
+    ],
+    "structuralNote": "Countering is mostly EMERGENT from covenant text, not from a published table: 奥术's 3-man effect makes 隐匿 fail in range; 炎 accelerates enemy element-damage recovery; 叙拉古 stacks 异常状态; 坚守 shares damage. So derive counters from effects, and treat this file as a starting prior."
+  },
+  "matrix": [
+    {
+      "tag": "特异",
+      "officialDesc": "拥有优秀的造成伤害和承受伤害能力",
+      "counters": [
+        { "covenant": "乌萨斯", "why": "ATK +(35+0.75×层数)%, HP +(10+0.3×层数)%, and 击倒 stacks — wins attrition stat-checks", "confidence": "medium" },
+        { "covenant": "卡西米尔", "why": "ATK ramps on every deployment up to +(50+1×层数)%; 6-man adds 65% true damage", "confidence": "medium" },
+        { "covenant": "精准", "why": "ignores 30% DEF and RES at 3-man — directly answers tanky units", "confidence": "medium" },
+        { "covenant": "阿戈尔", "why": "devours a neighbour for 5000 physical + inherits ATK/block, huge single-target body", "confidence": "medium" }
+      ],
+      "suffers": [],
+      "notes": "The generic 'big stats' tag; almost any committed comp handles it. Low priority for the recommender."
+    },
+    {
+      "tag": "飞行",
+      "officialDesc": "包含大量空中单位",
+      "counters": [
+        { "covenant": "精准", "why": "3-man extends the buff to ALL ranged operators — the only covenant that explicitly widens to ranged", "confidence": "medium" },
+        { "covenant": "莱塔尼亚", "why": "summons 一个小节/一个乐部 provide extra bodies + 攻速+20; community calls it a blanket answer", "confidence": "low" },
+        { "covenant": "谢拉格", "why": "雪山巨人 does ranged splash in 巨人形态", "confidence": "low" }
+      ],
+      "suffers": [
+        { "covenant": "独行", "why": "single-operator buffs give no air coverage breadth", "confidence": "low" },
+        { "covenant": "阿戈尔", "why": "melee devour engine contributes nothing to air", "confidence": "low" }
+      ],
+      "notes": "The clearest structural counter is 'bring enough ranged/anti-air', which is a lineup property, not a covenant property. Model it as a requirement on the operator set, not a covenant weight."
+    },
+    {
+      "tag": "频次",
+      "officialDesc": "需要一定攻击次数击破",
+      "counters": [
+        { "covenant": "莱塔尼亚", "why": "high summon count + 攻速 = many hits; NGA explicitly: '一键删除频次隐匿致命'", "confidence": "medium" },
+        { "covenant": "叙拉古", "why": "6-man: 30% chance per attack to apply debuffs, plus per-second true damage once 2+ debuffs — many hits, many procs", "confidence": "medium" },
+        { "covenant": "迅捷", "why": "skill-end SP refund → higher skill uptime → more hits", "confidence": "low" },
+        { "covenant": "突袭", "why": "50-layer: ALL operators +50 attack speed", "confidence": "medium" }
+      ],
+      "suffers": [
+        { "covenant": "阿戈尔", "why": "one huge devour hit is wasted on a hit-count shield", "confidence": "medium" }
+      ],
+      "notes": "Punishes single-big-hit comps; rewards attack-speed and summon density. 突袭's +50 ASPD is a clean, cheap answer."
+    },
+    {
+      "tag": "元素",
+      "officialDesc": "拥有造成元素损伤的能力",
+      "counters": [
+        { "covenant": "聚合", "why": "heals 生命值 AND 元素损伤 ((8+0.06×层数)% ATK/s) in range — the only explicit element-damage recovery", "confidence": "medium" },
+        { "covenant": "炎", "why": "6-man raises enemy element-damage RECOVERY +(40+0.3×层数)% — note this is a double-edged ally-side effect; also adds random element damage", "confidence": "medium" },
+        { "covenant": "坚守", "why": "40% damage sharing smooths burst element damage", "confidence": "low" }
+      ],
+      "suffers": [],
+      "notes": "聚合 is the designed answer. Community also cites 哈洛德 (谢拉格/维多利亚) as an element healer and 桑椹 (炎) as an alternative, but those are operator-level, not covenant-level."
+    },
+    {
+      "tag": "持续",
+      "officialDesc": "擅长造成持续性伤害",
+      "counters": [
+        { "covenant": "聚合", "why": "sustained AoE healing counteracts DoT", "confidence": "medium" },
+        { "covenant": "坚守", "why": "3-man: 40% of damage on non-坚守 operators is redistributed and partly converted; plus 反伤 + 脆弱", "confidence": "medium" },
+        { "covenant": "乌萨斯", "why": "6-man converts (15+0.05×层数)% of damage taken into 10s life-loss that stops when the source dies", "confidence": "low" }
+      ],
+      "suffers": [],
+      "notes": "Sustain check. 聚合+坚守 is the natural defensive pairing."
+    },
+    {
+      "tag": "隐匿",
+      "officialDesc": "拥有隐匿",
+      "counters": [
+        { "covenant": "奥术", "why": "3-man: enemies in 奥术 operators' range lose 隐匿 — the ONLY explicit reveal in the covenant set", "confidence": "medium" }
+      ],
+      "suffers": [],
+      "notes": "STRONGEST single mapping in this file: 隐匿 -> 奥术, stated in the game text. Treat as a hard requirement."
+    },
+    {
+      "tag": "折射",
+      "officialDesc": "拥有折射",
+      "counters": [
+        { "covenant": "精准", "why": "ignores 30% RES at 3-man, partially offsets reflection", "confidence": "low" },
+        { "covenant": "维多利亚", "why": "equipment-driven damage scaling (not pure arts burst)", "confidence": "low" }
+      ],
+      "suffers": [
+        { "covenant": "奥术", "why": "arts-heavy; reflection punishes high arts damage", "confidence": "medium" },
+        { "covenant": "莱塔尼亚", "why": "arts + summons into reflection", "confidence": "low" }
+      ],
+      "notes": "A DEBUFF tag for the popular 莱塔尼亚/奥术 line — this is where 'enemy tag counters the meta comp' actually bites. Weight it as a penalty on arts comps."
+    },
+    {
+      "tag": "致命",
+      "officialDesc": "在特定条件下造成高额伤害",
+      "counters": [
+        { "covenant": "坚守", "why": "damage sharing + 脆弱 reflection + heal-adjacent", "confidence": "medium" },
+        { "covenant": "聚合", "why": "shield (15+0.08×层数)% at 3-man plus healing", "confidence": "medium" },
+        { "covenant": "阿戈尔", "why": "6-man: first 3 阿戈尔 revive once — absorbs a lethal burst", "confidence": "medium" },
+        { "covenant": "不屈", "why": "(18+0.4×层数)% chance of instant redeploy on ground operators", "confidence": "low" },
+        { "covenant": "莱塔尼亚", "why": "NGA lists 致命 among the tags 莱塔尼亚 deletes (summon bodies soak)", "confidence": "low" }
+      ],
+      "suffers": [],
+      "notes": "Burst-survival check. Several partial answers; no single hard counter."
+    },
+    {
+      "tag": "复苏",
+      "officialDesc": "首次被击倒后会重生",
+      "counters": [
+        { "covenant": "叙拉古", "why": "per-second true damage + debuff lockdown keeps re-killing", "confidence": "low" },
+        { "covenant": "伊比利亚", "why": "stacking DoT + 20% bounce keeps pressure through the revive window", "confidence": "low" },
+        { "covenant": "莱塔尼亚", "why": "summon swarm sustains damage without cooldown gaps", "confidence": "low" }
+      ],
+      "suffers": [
+        { "covenant": "突袭", "why": "assassination/reposition bursts are wasted on a revive", "confidence": "low" }
+      ],
+      "notes": "Sustained-damage check; punishes one-shot burst."
+    }
+  ],
+  "commonComps": {
+    "_note": "Names/cores are from community discussion + covenant rosters in covenants_operators_regulation.json. Treat operator picks as examples, not doctrine.",
+    "comps": [
+      {
+        "name": "莱塔尼亚·奥术 (6莱)",
+        "coreCovenants": ["莱塔尼亚", "奥术"],
+        "coreOperators": ["车尔尼", "黑键", "艾雅法拉", "纯烬艾雅法拉", "卡涅利安", "地灵"],
+        "why": "summon swarm + 攻速 + 隐匿 reveal; cited as the season's strongest line ('一键删除频次隐匿致命')",
+        "weakVs": ["折射"],
+        "source": "https://ngabbs.com/read.php?tid=47953257",
+        "confidence": "medium"
+      },
+      {
+        "name": "阿戈尔·远见 (economy ramp)",
+        "coreCovenants": ["阿戈尔", "远见"],
+        "coreOperators": ["幽灵鲨", "深巡", "斯卡蒂", "歌蕾蒂娅", "乌尔比安", "克莱门莎"],
+        "why": "devour scaling + 远见 gold/discount; 盟誓 pairs 阿戈尔+远见 explicitly (+15 layers)",
+        "weakVs": ["频次", "飞行"],
+        "source": "PRTS 机变阶段 盟誓 list",
+        "confidence": "medium"
+      },
+      {
+        "name": "乌萨斯·不屈 (attrition)",
+        "coreCovenants": ["乌萨斯", "不屈"],
+        "coreOperators": ["折桠", "烈夏", "乌啾", "赫拉格", "怒潮凛冬", "冻河", "塔露拉"],
+        "why": "stat-check + revive; 盟誓 pairs 乌萨斯+不屈",
+        "weakVs": ["元素", "持续"],
+        "source": "PRTS 机变阶段 盟誓 list",
+        "confidence": "medium"
+      },
+      {
+        "name": "谢拉格·卡西米尔·莱塔尼亚 (triple)",
+        "coreCovenants": ["谢拉格", "卡西米尔", "莱塔尼亚"],
+        "coreOperators": ["锏", "凛御银灰", "玛恩纳", "薇薇安娜", "焰尾"],
+        "why": "the only 3-covenant 盟誓 (+12 layers); 锏 bridges all three",
+        "weakVs": ["折射"],
+        "source": "PRTS 机变阶段 盟誓 list",
+        "confidence": "medium"
+      },
+      {
+        "name": "维多利亚·助力 (equipment/economy)",
+        "coreCovenants": ["维多利亚", "助力"],
+        "coreOperators": ["维娜·维多利亚", "白铁", "涤火杰西卡", "烛煌", "酒神", "慕斯"],
+        "why": "equipment scaling + 助力 +2/+4 stacks to all covenants each 休整期",
+        "weakVs": ["频次"],
+        "source": "PRTS 机变阶段 盟誓 list; taptap 叠层 guide for 助力",
+        "confidence": "medium"
+      }
+    ],
+    "designerGroups": {
+      "_note": "From 关键目标 — the game's own covenant groupings, safest backbone for a preset.",
+      "groups": [
+        ["炎", "莱塔尼亚", "奥术"],
+        ["阿戈尔", "卡西米尔", "突袭"],
+        ["叙拉古", "萨尔贡", "精准"],
+        ["维多利亚", "谢拉格", "灵巧"],
+        ["乌萨斯", "伊比利亚", "聚合"],
+        ["奇迹", "远见", "投资人"],
+        ["迅捷", "不屈", "坚守", "助力"]
+      ],
+      "source": "https://prts.wiki/w/卫戍协议·规程 §关键目标"
+    }
+  }
+}

@@ -1,0 +1,32 @@
+# Dev artifacts / build outputs
+.venv/
+.build-venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.spec.bak
+spa_quicklook/_build_version.py
+
+# Local game/dev research
+research/
+shots/
+upstream/
+stronghold_repo/
+asp_repo/
+maa_user/
+prototype/
+PLAN.md
+probe_maa.py
+
+# Capture build outputs (keep source)
+capture/bin/
+capture/out/
+capture/src/**/bin/
+capture/src/**/obj/
+
+# Local release inputs/outputs
+*.zip
+*.sha256
+.pytest_cache/
