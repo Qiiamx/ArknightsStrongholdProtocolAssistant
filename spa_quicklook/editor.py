@@ -327,16 +327,26 @@ class PresetEditor:
         ).pack(side="left", padx=6)
 
     # ------------------------------------------------------------ selection
-    def _refresh_list(self) -> None:
+    def _refresh_list(self, select: int | None = None) -> None:
+        target = self.current if select is None else select
         self.listbox.delete(0, "end")
         for item in self.lineups:
             self.listbox.insert("end", item.get("name") or item.get("id") or "未命名")
+        if 0 <= target < len(self.lineups):
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(target)
 
     def _on_select(self, _event=None) -> None:
         sel = self.listbox.curselection()
-        if sel:
-            self.collect(silent=True)
-            self._select(sel[0])
+        if not sel:
+            return
+        index = sel[0]
+        # Save the item we are leaving, but do not refresh/reset the listbox
+        # selection to the old index before switching.  That reset made the
+        # left highlight lag one click behind the form.
+        self.collect(silent=True, refresh=False)
+        self._select(index)
+        self._refresh_list(select=index)
 
     def _select(self, index: int) -> None:
         if not (0 <= index < len(self.lineups)):
@@ -365,7 +375,7 @@ class PresetEditor:
         self.minor_label.configure(text=_targets_text(self.minor_targets) or "（未设置）")
 
     # ------------------------------------------------------------ editing
-    def collect(self, silent: bool = False) -> bool:
+    def collect(self, silent: bool = False, refresh: bool = True) -> bool:
         if not (0 <= self.current < len(self.lineups)):
             return False
         item = self.lineups[self.current]
@@ -395,9 +405,8 @@ class PresetEditor:
             if value:
                 item["enemyFit"][tag] = value
         item["notes"] = self.notes.get("1.0", "end").strip()
-        self._refresh_list()
-        self.listbox.selection_clear(0, "end")
-        self.listbox.selection_set(self.current)
+        if refresh:
+            self._refresh_list(select=self.current)
         return True
 
     def add(self) -> None:
