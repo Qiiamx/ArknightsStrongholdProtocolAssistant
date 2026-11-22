@@ -14,6 +14,8 @@ from .cli import _to_recognition_dict
 from .ocr import OcrEngine
 from .paths import counter_data_path, game_data_path, screenshots_dir
 from .recognize import read_image, recognize
+from .game import GameData, Recognition, banned_operators_by_rule
+from .stackers import StackerPreset, group_by_tier, remaining, tier_roman
 from .updater import UpdateInfo, check_latest, download_and_apply
 from .version import __version__
 from .winutil import find_game_window, is_minimized, is_window, set_dpi_aware, window_rect
@@ -36,6 +38,121 @@ WIDTH = 360
 MARGIN = 8
 
 
+class StackerFilterDialog:
+    """Manual exclusions for the preset stacker list."""
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        game: GameData,
+        names: list[str],
+        manual_banned: set[str],
+        inferred_banned: set[str],
+    ):
+        self.game = game
+        self.manual = set(manual_banned)
+        self.inferred = set(inferred_banned)
+        self.result: set[str] | None = None
+        self.vars: dict[str, tk.BooleanVar] = {}
+
+        self.win = tk.Toplevel(parent)
+        self.win.title("手动排除叠层手")
+        self.win.geometry("620x680")
+        self.win.configure(bg=BG)
+        self.win.transient(parent)
+        self.win.attributes("-topmost", True)
+        self.win.grab_set()
+
+        tk.Label(
+            self.win, text="手动排除叠层手", bg=BG, fg=ACCENT,
+            font=("Microsoft YaHei UI", 12, "bold"),
+        ).pack(anchor="w", padx=12, pady=(10, 2))
+        tk.Label(
+            self.win,
+            text="取消勾选 = 本局手动排除。标灰的是按盟约推断被 ban 的，不能重新启用。",
+            bg=BG, fg=MUTED, font=FONT_SMALL, wraplength=580, justify="left",
+        ).pack(anchor="w", padx=12, pady=(0, 6))
+
+        wrap = tk.Frame(self.win, bg=PANEL)
+        wrap.pack(fill="both", expand=True, padx=12, pady=4)
+        canvas = tk.Canvas(wrap, bg=PANEL, highlightthickness=0)
+        scroll = tk.Scrollbar(wrap, command=canvas.yview, bg=PANEL, troughcolor=PANEL, bd=0)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        body = tk.Frame(canvas, bg=PANEL)
+        window = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+
+        ops = [game.operators[n] for n in names if n in game.operators]
+        for tier, group in group_by_tier(ops):
+            tk.Label(
+                body, text=f"等级 {tier_roman(tier)}", bg=BG, fg=ACCENT,
+                font=("Microsoft YaHei UI", 11, "bold"),
+            ).pack(anchor="w", padx=8, pady=(8, 2))
+            grid = tk.Frame(body, bg=PANEL)
+            grid.pack(fill="x", padx=6)
+            grid.columnconfigure(0, weight=1)
+            grid.columnconfigure(1, weight=1)
+            for i, op in enumerate(group):
+                var = tk.BooleanVar(value=op.name not in self.manual and op.name not in self.inferred)
+                self.vars[op.name] = var
+                cb = tk.Checkbutton(
+                    grid,
+                    text=f"{op.name}   {'/'.join(op.covenants) or '—'}",
+                    variable=var,
+                    anchor="w",
+                    justify="left",
+                    bg=PANEL,
+                    fg=MUTED if op.name in self.inferred else TEXT,
+                    activebackground=PANEL,
+                    activeforeground=ACCENT,
+                    selectcolor="#0a2024",
+                    font=FONT,
+                    bd=0,
+                    highlightthickness=0,
+                )
+                if op.name in self.inferred:
+                    cb.configure(state="disabled")
+                cb.grid(row=i // 2, column=i % 2, sticky="w", padx=6, pady=2)
+
+        btns = tk.Frame(self.win, bg=BG)
+        btns.pack(fill="x", padx=12, pady=8)
+        tk.Button(
+            btns, text="应用", command=self._apply, bg=ACCENT, fg="#062022",
+            relief="flat", bd=0, font=FONT_SMALL, padx=14, pady=4, cursor="hand2",
+        ).pack(side="right")
+        tk.Button(
+            btns, text="取消", command=self._cancel, bg=PANEL, fg=TEXT,
+            relief="flat", bd=0, font=FONT_SMALL, padx=12, pady=4, cursor="hand2",
+        ).pack(side="right", padx=6)
+        tk.Button(
+            btns, text="全部保留", command=self._keep_all, bg=PANEL, fg=TEXT,
+            relief="flat", bd=0, font=FONT_SMALL, padx=12, pady=4, cursor="hand2",
+        ).pack(side="left")
+
+        self.win.wait_window(self.win)
+
+    def _keep_all(self) -> None:
+        for name, var in self.vars.items():
+            if name not in self.inferred:
+                var.set(True)
+
+    def _apply(self) -> None:
+        self.result = {
+            name for name, var in self.vars.items() if name not in self.inferred and not var.get()
+        }
+        self.win.destroy()
+
+    def _cancel(self) -> None:
+        self.result = None
+        self.win.destroy()
+
+    def show(self) -> set[str] | None:
+        return self.result
+
+
 class SidePanel:
     def __init__(self, preset_path: Path, pid: int | None = None):
         set_dpi_aware()
@@ -49,7 +166,7 @@ class SidePanel:
         self.game = None
         self.last_rec: dict[str, Any] | None = None
         self.last_rec_dict: dict[str, Any] | None = None
-        self.last_result: dict[str, Any] | None = None
+        self.manual_banned: set[str] = set()
         self.update_info: UpdateInfo | None = None
 
         self.root = tk.Tk()
@@ -122,7 +239,7 @@ class SidePanel:
 
         self.edit_btn = tk.Button(
             self.header,
-            text="编辑阵容",
+            text="编辑叠层手",
             command=self._open_editor,
             bg=PANEL,
             fg=TEXT,
@@ -204,7 +321,7 @@ class SidePanel:
 
         self.reload_btn = tk.Button(
             footer,
-            text="重载预设",
+            text="重载名单",
             command=self._reload_preset,
             bg=PANEL,
             fg=TEXT,
@@ -218,6 +335,23 @@ class SidePanel:
             cursor="hand2",
         )
         self.reload_btn.pack(side="left", padx=(6, 0))
+
+        self.exclude_btn = tk.Button(
+            footer,
+            text="排除",
+            command=self._open_exclusion,
+            bg=PANEL,
+            fg=TEXT,
+            activebackground=BORDER,
+            activeforeground=TEXT,
+            relief="flat",
+            bd=0,
+            font=FONT_SMALL,
+            padx=8,
+            pady=8,
+            cursor="hand2",
+        )
+        self.exclude_btn.pack(side="left", padx=(6, 0))
 
         self.update_btn = tk.Button(
             footer,
@@ -351,15 +485,13 @@ class SidePanel:
 
     def _load_game_data(self) -> None:
         try:
-            from .recommender import GameData
-
             self.game = GameData(game_data_path(), counter_data_path())
         except Exception as exc:
             self.status.configure(text=f"数据加载失败：{exc}", fg=BAD)
             self.game = None
 
     def _reload_preset(self) -> None:
-        self.status.configure(text="预设已重载（下次识别生效）", fg=MUTED)
+        self.status.configure(text="叠层手名单已重载（下次识别生效）", fg=MUTED)
 
     def _auto_check_update(self) -> None:
         if not getattr(sys, "frozen", False):
@@ -474,11 +606,7 @@ class SidePanel:
                 raise RuntimeError("；".join(rec.get("warnings") or ["未识别到确认本局信息"]))
 
             rec_dict, _ = _to_recognition_dict(rec)
-            from .recommender import Preset, Recognition, recommend
-
-            preset = Preset.load(self.preset_path)
-            result = recommend(self.game, Recognition.from_dict(rec_dict), preset)
-            self.root.after(0, lambda: self._show_result(rec, rec_dict, result))
+            self.root.after(0, lambda: self._show_result(rec, rec_dict))
         except Exception as exc:
             message = str(exc)
             self.root.after(0, lambda: self._show_error(message))
@@ -505,9 +633,9 @@ class SidePanel:
             ]
         )
 
-    def _show_result(self, rec: dict, rec_dict: dict, result: dict) -> None:
+    def _show_result(self, rec: dict, rec_dict: dict) -> None:
         self.busy = False
-        self.last_rec, self.last_rec_dict, self.last_result = rec, rec_dict, result
+        self.last_rec, self.last_rec_dict = rec, rec_dict
         self.scan_btn.configure(state="normal", text="截图识别")
         self.status.configure(text=f"识别完成 · 置信度 {rec.get('confidence')}", fg=MUTED)
         parts: list[tuple[str, str]] = []
@@ -528,40 +656,74 @@ class SidePanel:
             parts.append(("附加盟约未显示：滚动准备页后重新截图", "warn"))
 
         parts.append(("", "body"))
-        parts.append(("本次推荐", "title"))
-        items = result.get("recommendations") or []
-        shown = 0
-        for item in items:
-            if shown >= 3:
-                break
-            if not item.get("feasible") and shown >= 1:
-                continue
-            mark = "[OK]" if item.get("feasible") else "[X]"
-            tag = "ok" if item.get("feasible") else "bad"
-            parts.append((f"{shown + 1}. {mark} {item['name']}  {item['score']:.2f}", tag))
-            core = [x["covenant"] for x in item.get("core_plan") or [] if x.get("ok")]
-            extra = [x["covenant"] for x in item.get("minor_plan") or [] if x.get("ok")]
-            if core:
-                parts.append(("   主：" + "、".join(core), "body"))
-            if extra:
-                parts.append(("   副：" + "、".join(extra), "body"))
-            for reason in (item.get("reasons") or [])[:2]:
-                parts.append(("   " + reason, "dim"))
-            for warning in (item.get("warnings") or [])[:2]:
-                parts.append(("   ! " + warning, "warn"))
-            if item.get("rejected_because"):
-                parts.append(("   拒绝：" + item["rejected_because"], "bad"))
-            shown += 1
-        if shown == 0:
-            parts.append(("没有可用预设；点「编辑阵容」或查看下方盟约备选。", "warn"))
-            plan = result.get("covenant_plan") or {}
-            if plan.get("core"):
-                parts.append(("大盟约备选：" + "、".join(x["covenant"] for x in plan["core"]), "body"))
-            if plan.get("minor"):
-                parts.append(("小盟约备选：" + "、".join(x["covenant"] for x in plan["minor"]), "body"))
-        for warning in result.get("warnings") or []:
-            parts.append(("[!] " + warning, "warn"))
+        parts.append(("剩余叠层手", "title"))
+        if self.game is None:
+            parts.append(("数据未加载", "bad"))
+            self._set_text(parts)
+            return
+
+        try:
+            preset = StackerPreset.load(self.preset_path, self.game)
+            recognized = Recognition.from_dict(rec_dict)
+            available, banned, unknown = remaining(
+                self.game, recognized, preset, self.manual_banned
+            )
+        except Exception as exc:
+            parts.append((f"读取叠层手名单失败：{exc}", "bad"))
+            self._set_text(parts)
+            return
+
+        if not preset.names:
+            parts.append(("名单为空。点「编辑叠层手」勾选本局要关注的角色。", "warn"))
+        else:
+            tiers = sorted(
+                {
+                    self.game.operators[name].tier
+                    for name in preset.names
+                    if name in self.game.operators
+                },
+                reverse=True,
+            )
+            grouped = dict(group_by_tier(available))
+            for tier in tiers:
+                ops = grouped.get(tier, [])
+                parts.append((f"等级 {tier_roman(tier)} · {len(ops)} 人", "ok" if ops else "dim"))
+                for op in ops:
+                    parts.append((f"  {op.name}   {'/'.join(op.covenants) or '—'}", "body"))
+        if banned:
+            parts.append((f"已排除：{len(banned)} 人（盟约推断 + 手动）", "dim"))
+        if unknown:
+            parts.append(("名单中无法识别的叠层手：" + "、".join(unknown[:8]), "warn"))
+        parts.append(("点「排除」可手动移除推断遗漏的干员。", "dim"))
         self._set_text(parts)
+
+    def _open_exclusion(self) -> None:
+        if self.game is None:
+            self.status.configure(text="数据未加载，无法排除", fg=BAD)
+            return
+        try:
+            preset = StackerPreset.load(self.preset_path, self.game)
+        except Exception as exc:
+            self.status.configure(text=f"读取名单失败：{exc}", fg=BAD)
+            return
+        names = [n for n in preset.names if n in self.game.operators]
+        if not names:
+            self.status.configure(text="名单为空，先编辑叠层手", fg=WARN)
+            return
+        inferred: set[str] = set()
+        if self.last_rec_dict:
+            try:
+                inferred = banned_operators_by_rule(
+                    self.game, Recognition.from_dict(self.last_rec_dict), preset.availability_rule
+                )
+            except Exception:
+                inferred = set()
+        dialog = StackerFilterDialog(self.root, self.game, names, self.manual_banned, inferred)
+        result = dialog.show()
+        if result is not None:
+            self.manual_banned = result
+            if self.last_rec is not None and self.last_rec_dict is not None:
+                self._show_result(self.last_rec, self.last_rec_dict)
 
     # -------------------------------------------------------------- editor
     def _open_editor(self) -> None:
@@ -579,16 +741,9 @@ class SidePanel:
         if path is not None:
             self.preset_path = Path(path)
         self.preset_label.configure(text=self.preset_path.name)
-        self.status.configure(text="预设已保存", fg=MUTED)
-        if self.last_rec and self.last_rec_dict and self.game is not None:
-            try:
-                from .recommender import Preset, Recognition, recommend
-
-                preset = Preset.load(self.preset_path)
-                result = recommend(self.game, Recognition.from_dict(self.last_rec_dict), preset)
-                self._show_result(self.last_rec, self.last_rec_dict, result)
-            except Exception as exc:
-                self.status.configure(text=f"预设重算失败：{exc}", fg=BAD)
+        self.status.configure(text="叠层手名单已保存", fg=MUTED)
+        if self.last_rec is not None and self.last_rec_dict is not None:
+            self._show_result(self.last_rec, self.last_rec_dict)
 
     def close(self) -> None:
         self.closed = True

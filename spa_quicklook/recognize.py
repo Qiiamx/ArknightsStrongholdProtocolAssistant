@@ -1,7 +1,7 @@
 """Prep-screen recognition: covenant states + enemy tags.
 
 This module deliberately knows nothing about the recommendation layer. It
-returns a small, versioned dict; the recommender consumes it independently.
+returns a small, versioned dict; the stacker panel consumes it independently.
 
 Target screen: 「确认本局信息」 (prep briefing). The covenant strip is read by
 OCR names + icon colour; the enemy panel is read by OCR. The long banned-operator
