@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .paths import APP_DIR, USER_DIR, ensure_user_dir
+from .paths import APP_DIR, ensure_user_dir, load_settings
 from .version import __version__
 
 
@@ -36,12 +36,19 @@ class UpdateInfo:
 
 def _config() -> dict[str, Any]:
     path = APP_DIR / "update.json"
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
-    except Exception:
-        return {}
+    data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8-sig"))
+            if isinstance(raw, dict):
+                data = dict(raw)
+        except Exception:
+            data = {}
+    # User-level settings survive app updates (the release replaces update.json).
+    user = load_settings()
+    if "proxy" in user:
+        data["proxy"] = str(user.get("proxy") or "")
+    return data
 
 
 def _repo() -> str:
