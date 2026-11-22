@@ -95,8 +95,27 @@ powershell -ExecutionPolicy Bypass -File packaging\build_release.ps1 `
 产物：`dist\SPA-QuickLook-win-x64.zip` 和 `.sha256`。
 
 PyInstaller 打进 Python/OCR 运行时，`wincap.exe` 用 .NET 自包含单文件；
-发布包约 200 MB 左右（zip 后更小）。源码仓库不包含 `research/`、截图、
+发布包约 **120 MB（zip）/ 248 MB（解压）**。源码仓库不包含 `research/`、截图、
 录像和构建产物。
+
+## 发布到 GitHub
+
+当前目标仓库 `Qiiamx/SPA-QuickLook` 还没有创建；创建空仓库后：
+
+```powershell
+cd SPA-QuickLook   # 或你的本地仓库目录
+git remote add origin https://github.com/Qiiamx/SPA-QuickLook.git
+git push -u origin main
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+推送 `v*` tag 后，`.github/workflows/release.yml` 会自动构建并创建 Release，
+上传 `SPA-QuickLook-win-x64.zip` 与 `.sha256`。如果不想用 Actions，也可以直接把
+`dist/SPA-QuickLook-win-x64.zip` 手动上传到 Release，并发布同名 `.sha256`。
+
+`update.json` 中的 `repo` 必须与实际仓库一致；CI 构建会自动使用
+`${{ github.repository }}`，本地构建用 `-Repo` 参数指定。
 
 ## 目录
 
