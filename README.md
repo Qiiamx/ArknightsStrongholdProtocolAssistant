@@ -14,7 +14,7 @@
 
 ## 如何使用
 
-1. 打开 [Releases](../../releases/latest)，下载 `ASPA-win-x64.zip`。
+1. 打开 [Releases](https://github.com/Qiiamx/ArknightsStrongholdProtocolAssistant/releases/latest)，下载 `ASPA-win-x64.zip`。
 2. 解压到一个可写目录（保留 `_internal` 和 `wincap.exe`，不要只拿 exe）。
 3. 双击 `ASPA.exe`，侧栏会自动贴到明日方舟窗口右侧。
 4. 在游戏里停在「确认本局信息」页，点侧栏 **「截图识别」**。
