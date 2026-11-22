@@ -234,7 +234,6 @@ class Lineup:
     minor: dict[str, int]
     required_operators: list[str]
     core_operators: list[str]
-    optional_operators: list[str]
     enemy_fit: dict[str, float]
     priority: float
     notes: str = ""
@@ -243,6 +242,12 @@ class Lineup:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "Lineup":
         ops = d.get("operators") or {}
+        # "optional" was removed from the editor; old presets are migrated into
+        # core operators so existing files keep their intended roster.
+        core_operators = list(ops.get("core") or ())
+        for name in ops.get("optional") or ():
+            if name not in core_operators:
+                core_operators.append(name)
         return cls(
             id=d["id"],
             name=d.get("name") or d["id"],
@@ -250,8 +255,7 @@ class Lineup:
             core=dict(d.get("core") or {}),
             minor=dict(d.get("minor") or {}),
             required_operators=list(ops.get("required") or ()),
-            core_operators=list(ops.get("core") or ()),
-            optional_operators=list(ops.get("optional") or ()),
+            core_operators=core_operators,
             enemy_fit=dict(d.get("enemyFit") or {}),
             priority=float(d.get("priority") or 0),
             notes=d.get("notes") or "",
@@ -370,9 +374,6 @@ def evaluate_lineup(
     missing_core = [o for o in lineup.core_operators if o in banned_ops]
     if missing_core:
         warnings.append("核心干员被禁：" + "、".join(missing_core))
-    missing_optional = [o for o in lineup.optional_operators if o in banned_ops]
-    if missing_optional:
-        warnings.append("可选干员被禁：" + "、".join(missing_optional))
 
     # 4. Activation feasibility from the remaining pool.
     core_plan: list[dict[str, Any]] = []
@@ -474,7 +475,6 @@ def evaluate_lineup(
         - 2.0 * len(banned_core)
         - 1.0 * len(banned_minor)
         - 2.0 * len(missing_core)
-        - 0.5 * len(missing_optional)
     )
     reasons.insert(0, f"主盟约 {primary or '—'} 可用")
     if primary:

@@ -26,6 +26,79 @@ FONT = ("Microsoft YaHei UI", 10)
 FONT_SMALL = ("Microsoft YaHei UI", 9)
 
 
+class Tooltip:
+    """Small hover tooltip used by the preset editor's ? marks."""
+
+    def __init__(self, widget: tk.Misc, text: str, delay: int = 350):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self._after: str | None = None
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+        widget.bind("<Destroy>", self._destroy, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel()
+        self._after = self.widget.after(self.delay, self._show)
+
+    def _cancel(self) -> None:
+        if self._after is not None:
+            try:
+                self.widget.after_cancel(self._after)
+            except tk.TclError:
+                pass
+            self._after = None
+
+    def _show(self) -> None:
+        self._after = None
+        if self._tip is not None or not self.widget.winfo_exists():
+            return
+        self._tip = tk.Toplevel(self.widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_attributes("-topmost", True)
+        label = tk.Label(
+            self._tip,
+            text=self.text,
+            justify="left",
+            anchor="w",
+            bg="#173438",
+            fg=TEXT,
+            relief="solid",
+            bd=1,
+            font=FONT_SMALL,
+            wraplength=380,
+            padx=9,
+            pady=7,
+        )
+        label.pack()
+        self._tip.update_idletasks()
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 8
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        width = self._tip.winfo_width()
+        height = self._tip.winfo_height()
+        if x + width > self.widget.winfo_screenwidth() - 8:
+            x = self.widget.winfo_rootx() - width - 8
+        if y + height > self.widget.winfo_screenheight() - 8:
+            y = self.widget.winfo_rooty() - height - 4
+        self._tip.wm_geometry(f"+{max(4, x)}+{max(4, y)}")
+
+    def _hide(self, _event=None) -> None:
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+    def _destroy(self, _event=None) -> None:
+        self._cancel()
+        self._hide()
+
+
 def _split(text: str) -> list[str]:
     return [x.strip() for x in text.replace("，", ",").split(",") if x.strip()]
 
@@ -150,6 +223,39 @@ class PresetEditor:
         self.status = tk.Label(self.win, text="", bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w")
         self.status.pack(fill="x", padx=12, pady=(0, 8))
 
+    def _label_with_help(
+        self,
+        parent: tk.Misc,
+        text: str,
+        row: int,
+        column: int = 0,
+        columnspan: int = 1,
+        sticky: str = "w",
+        padx: tuple[int, int] | int = (12, 8),
+        pady: int | tuple[int, int] = 4,
+        help_text: str = "",
+        fg: str = MUTED,
+        font: tuple = FONT_SMALL,
+    ) -> tk.Label:
+        box = tk.Frame(parent, bg=parent.cget("bg"))
+        box.grid(row=row, column=column, columnspan=columnspan, sticky=sticky, padx=padx, pady=pady)
+        label = tk.Label(box, text=text, bg=parent.cget("bg"), fg=fg, font=font)
+        label.pack(side="left")
+        if help_text:
+            mark = tk.Label(
+                box,
+                text="?",
+                bg=parent.cget("bg"),
+                fg=ACCENT,
+                font=("Microsoft YaHei UI", 9, "bold"),
+                cursor="hand2",
+                padx=3,
+            )
+            mark.pack(side="left")
+            Tooltip(mark, help_text)
+            Tooltip(label, help_text)
+        return label
+
     def _build_lineup(self) -> None:
         left = tk.Frame(self.tab_lineup, bg=BG)
         left.pack(side="left", fill="y", padx=(8, 6), pady=8)
@@ -180,10 +286,8 @@ class PresetEditor:
         form.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         self.form = form
 
-        def field(label: str, key: str, row: int, width: int = 44) -> tk.Entry:
-            tk.Label(form, text=label, bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
-                row=row, column=0, sticky="w", padx=(12, 8), pady=4
-            )
+        def field(label: str, key: str, row: int, width: int = 44, help_text: str = "") -> tk.Entry:
+            self._label_with_help(form, label, row, 0, padx=(12, 8), pady=4, help_text=help_text)
             var = tk.StringVar()
             self.vars[key] = var
             entry = tk.Entry(
@@ -196,12 +300,33 @@ class PresetEditor:
         r = 0
         field("名称", "name", r); r += 1
         field("ID（唯一）", "id", r); r += 1
-        field("主核心", "primaryCore", r); r += 1
+        field(
+            "主核心",
+            "primaryCore",
+            r,
+            help_text="阵容锚点。若识别到该核心被禁，整套阵容直接不推荐（0 分），不是只扣分。",
+        ); r += 1
         field("模式（逗号分隔，可空）", "modes", r); r += 1
-        field("优先级（数字）", "priority", r); r += 1
+        field(
+            "优先级（数字）",
+            "priority",
+            r,
+            help_text=(
+                "基础分，不是概率。最终评分 += 基础优先级权重 × 这个数字。\n"
+                "默认权重 1.0 时：优先级 10 → +10 分，优先级 5 → +5 分。"
+            ),
+        ); r += 1
 
-        tk.Label(form, text="核心盟约目标", bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
-            row=r, column=0, sticky="w", padx=(12, 8), pady=4
+        self._label_with_help(
+            form,
+            "核心盟约目标",
+            r,
+            0,
+            help_text=(
+                "格式：盟约:目标层数（如 莱塔尼亚:6）。\n"
+                "这个数字用于检查当前卡池够不够激活盟约，本身不直接加分；"
+                "如果可用干员数低于门槛，会提示「可能无法激活」，并把激活权重项归零。"
+            ),
         )
         self.core_label = tk.Label(form, text="（未设置）", bg=PANEL, fg=TEXT, font=FONT_SMALL, anchor="w")
         self.core_label.grid(row=r, column=1, sticky="w", padx=(0, 6))
@@ -211,8 +336,15 @@ class PresetEditor:
         ).grid(row=r, column=2, sticky="w", padx=(0, 12))
         r += 1
 
-        tk.Label(form, text="附加盟约目标", bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
-            row=r, column=0, sticky="w", padx=(12, 8), pady=4
+        self._label_with_help(
+            form,
+            "附加盟约目标",
+            r,
+            0,
+            help_text=(
+                "格式：盟约:目标层数（如 奥术:2）。\n"
+                "同样用于卡池可行性检查，不直接加分；全部附加盟约被禁时整条阵容不推荐。"
+            ),
         )
         self.minor_label = tk.Label(form, text="（未设置）", bg=PANEL, fg=TEXT, font=FONT_SMALL, anchor="w")
         self.minor_label.grid(row=r, column=1, sticky="w", padx=(0, 6))
@@ -222,9 +354,17 @@ class PresetEditor:
         ).grid(row=r, column=2, sticky="w", padx=(0, 12))
         r += 1
 
-        for label, key in (("必选干员", "required"), ("核心干员", "core"), ("可选干员", "optional")):
-            tk.Label(form, text=label, bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
-                row=r, column=0, sticky="w", padx=(12, 8), pady=4
+        for label, key in (("必选干员", "required"), ("核心干员", "core")):
+            self._label_with_help(
+                form,
+                label,
+                r,
+                0,
+                help_text=(
+                    "干员被禁的固定扣分（不受权重影响）：核心干员 -2/个；"
+                    "必选干员被禁则整条阵容不推荐。\n"
+                    "是否被禁由「全局权重 → 干员可用性规则」判定。"
+                ),
             )
             var = tk.StringVar()
             self.vars[key] = var
@@ -238,8 +378,27 @@ class PresetEditor:
             ).grid(row=r, column=2, sticky="w", padx=(0, 12))
             r += 1
 
-        tk.Label(form, text="敌人词条赋分（-3 被克制 … +3 克制）", bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
-            row=r, column=0, columnspan=3, sticky="w", padx=12, pady=(10, 2)
+        tk.Label(
+            form,
+            text="可用性判定：必选/核心干员 → 「全局权重 → 干员可用性规则」；主核心与盟约目标直接使用本局识别结果。",
+            bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=660, justify="left",
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=12, pady=(2, 4))
+        r += 1
+
+        self._label_with_help(
+            form,
+            "敌人词条赋分（-3 被克制 … +3 克制）",
+            r,
+            0,
+            columnspan=3,
+            padx=12,
+            pady=(10, 2),
+            help_text=(
+                "只对本局实际识别到的词条求和：\n"
+                "· +3 表示阵容克制该词条，-3 表示被该词条克制，0 表示不评价；\n"
+                "· 最终评分 += 敌人词条权重 × 这些值的和；\n"
+                "· 没有填写的词条按内置克制表推算（克制 +0.8 / 被克制 -0.8），未出现的词条不计分。"
+            ),
         )
         r += 1
         enemy_frame = tk.Frame(form, bg=PANEL)
@@ -247,13 +406,22 @@ class PresetEditor:
         for i, tag in enumerate(ENEMY_TAGS):
             var = tk.StringVar(value="0")
             self.enemy_vars[tag] = var
-            tk.Label(enemy_frame, text=tag, bg=PANEL, fg=TEXT, font=FONT_SMALL).grid(
+            tag_help = (
+                f"「{tag}」：本局出现该词条时才计入敌人词条总分。\n"
+                "正数=你的阵容克制它，负数=被它克制，0=不评价。\n"
+                "建议范围 -3..+3；最终会乘以「敌人词条权重」。"
+            )
+            tag_label = tk.Label(enemy_frame, text=tag, bg=PANEL, fg=TEXT, font=FONT_SMALL)
+            tag_label.grid(
                 row=i // 3, column=(i % 3) * 2, sticky="e", padx=(0, 4), pady=2
             )
-            tk.Spinbox(
+            Tooltip(tag_label, tag_help)
+            spin = tk.Spinbox(
                 enemy_frame, from_=-3, to=3, width=4, textvariable=var, bg="#0a2024", fg=TEXT,
                 relief="flat", bd=2, font=FONT_SMALL, buttonbackground=PANEL,
-            ).grid(row=i // 3, column=(i % 3) * 2 + 1, sticky="w", padx=(0, 14), pady=2)
+            )
+            spin.grid(row=i // 3, column=(i % 3) * 2 + 1, sticky="w", padx=(0, 14), pady=2)
+            Tooltip(spin, tag_help)
         r += 1
 
         tk.Label(form, text="备注", bg=PANEL, fg=MUTED, font=FONT_SMALL).grid(
@@ -279,6 +447,26 @@ class PresetEditor:
         self.weight_vars: dict[str, tk.StringVar] = {}
         weights = self.data.get("weights") or {}
         defaults = {"priority": 1.0, "enemy": 2.0, "activation": 1.5, "banResilience": 0.5}
+        help_texts = {
+            "priority": (
+                "乘在「优先级」字段上：最终评分 += 该权重 × 优先级。\n"
+                "默认 1.0；调到 2.0 表示优先级的影响翻倍。"
+            ),
+            "enemy": (
+                "乘在敌人词条赋分的总和上：最终评分 += 该权重 × Σ词条赋分。\n"
+                "默认 2.0，所以某个词条填 +1，实际贡献 +2 分；-1 则贡献 -2 分。"
+            ),
+            "activation": (
+                "乘在 0–1 的激活质量上：最终评分 += 该权重 × 激活质量。\n"
+                "激活质量 = 计划盟约内可用的「持续叠加」干员数 / 10（封顶 1）；"
+                "若当前卡池不足以激活任一目标盟约，则这一项直接按 0 计算。默认 1.5。"
+            ),
+            "banResilience": (
+                "乘在 0–1 的抗 ban 比例上：最终评分 += 该权重 × 抗 ban 比例。\n"
+                "抗 ban 比例 = 核心干员中拥有 ≥2 个核心盟约身份的人数 / 核心干员数；"
+                "比例越高，被 ban 一个核心时越不伤。默认 0.5。"
+            ),
+        }
         for i, (key, label) in enumerate(
             (
                 ("priority", "基础优先级权重"),
@@ -287,7 +475,17 @@ class PresetEditor:
                 ("banResilience", "多核心抗 ban 权重"),
             )
         ):
-            tk.Label(frame, text=label, bg=PANEL, fg=TEXT, font=FONT).grid(row=i, column=0, sticky="w", padx=12, pady=8)
+            self._label_with_help(
+                frame,
+                label,
+                i,
+                0,
+                padx=12,
+                pady=8,
+                fg=TEXT,
+                font=FONT,
+                help_text=help_texts[key],
+            )
             var = tk.StringVar(value=str(weights.get(key, defaults[key])))
             self.weight_vars[key] = var
             tk.Entry(frame, textvariable=var, width=10, bg="#0a2024", fg=TEXT, relief="flat", bd=4).grid(
@@ -295,7 +493,23 @@ class PresetEditor:
             )
 
         scope = self.data.setdefault("scope", {})
-        tk.Label(frame, text="可用性规则", bg=PANEL, fg=TEXT, font=FONT).grid(row=4, column=0, sticky="w", padx=12, pady=8)
+        self._label_with_help(
+            frame,
+            "干员可用性规则（全局）",
+            4,
+            0,
+            padx=12,
+            pady=8,
+            fg=TEXT,
+            font=FONT,
+            help_text=(
+                "只作用于干员：按干员自身的核心/附加盟约判断该干员是否被视为被禁。\n"
+                "不改变主核心、核心盟约目标、附加盟约目标的判定——这些直接用本局识别结果。\n"
+                "· anyCoreBanned：任意核心被禁 → 该干员视为不可用（默认，最保守）；\n"
+                "· allCoresBanned：全部核心都被禁 → 才视为不可用；\n"
+                "· coreAndAdditionalBanned：核心和附加都有被禁 → 才视为不可用。"
+            ),
+        )
         self.rule_var = tk.StringVar(value=scope.get("availabilityRule", "anyCoreBanned"))
         ttk.Combobox(
             frame,
@@ -306,9 +520,18 @@ class PresetEditor:
         ).grid(row=4, column=1, sticky="w", padx=12)
         tk.Label(
             frame,
-            text="默认 anyCoreBanned；识别到「本局禁用干员」列表时以列表为准（当前未读头像）。",
+            text="默认 anyCoreBanned；只作用于必选/核心干员，主核心与盟约目标不使用它。识别到「本局禁用干员」列表时以列表为准（当前未读头像）。",
             bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=620, justify="left",
         ).grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8))
+        tk.Label(
+            frame,
+            text=(
+                "最终评分 = 优先级权重×优先级 + 敌人权重×词条和 + 激活权重×激活质量 + 抗ban权重×抗ban比例\n"
+                "固定扣分（不受权重影响）：核心盟约被禁 -2/个，附加盟约被禁 -1/个，"
+                "核心干员被禁 -2/个；主核心/必选干员被禁或模式不匹配则整条不推荐。"
+            ),
+            bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=680, justify="left",
+        ).grid(row=6, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4))
 
     def _build_raw(self) -> None:
         frame = tk.Frame(self.tab_raw, bg=BG)
@@ -327,16 +550,26 @@ class PresetEditor:
         ).pack(side="left", padx=6)
 
     # ------------------------------------------------------------ selection
-    def _refresh_list(self) -> None:
+    def _refresh_list(self, select: int | None = None) -> None:
+        target = self.current if select is None else select
         self.listbox.delete(0, "end")
         for item in self.lineups:
             self.listbox.insert("end", item.get("name") or item.get("id") or "未命名")
+        if 0 <= target < len(self.lineups):
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(target)
 
     def _on_select(self, _event=None) -> None:
         sel = self.listbox.curselection()
-        if sel:
-            self.collect(silent=True)
-            self._select(sel[0])
+        if not sel:
+            return
+        index = sel[0]
+        # Save the item we are leaving, but do not refresh/reset the listbox
+        # selection to the old index before switching.  That reset made the
+        # left highlight lag one click behind the form.
+        self.collect(silent=True, refresh=False)
+        self._select(index)
+        self._refresh_list(select=index)
 
     def _select(self, index: int) -> None:
         if not (0 <= index < len(self.lineups)):
@@ -352,8 +585,11 @@ class PresetEditor:
         self.minor_targets = dict(item.get("minor") or {})
         ops = item.get("operators") or {}
         self.vars["required"].set("，".join(ops.get("required") or []))
-        self.vars["core"].set("，".join(ops.get("core") or []))
-        self.vars["optional"].set("，".join(ops.get("optional") or []))
+        core_ops = list(ops.get("core") or [])
+        for name in ops.get("optional") or []:
+            if name not in core_ops:
+                core_ops.append(name)
+        self.vars["core"].set("，".join(core_ops))
         for tag in ENEMY_TAGS:
             self.enemy_vars[tag].set(str((item.get("enemyFit") or {}).get(tag, 0)))
         self.notes.delete("1.0", "end")
@@ -365,7 +601,7 @@ class PresetEditor:
         self.minor_label.configure(text=_targets_text(self.minor_targets) or "（未设置）")
 
     # ------------------------------------------------------------ editing
-    def collect(self, silent: bool = False) -> bool:
+    def collect(self, silent: bool = False, refresh: bool = True) -> bool:
         if not (0 <= self.current < len(self.lineups)):
             return False
         item = self.lineups[self.current]
@@ -384,7 +620,6 @@ class PresetEditor:
         item["operators"] = {
             "required": _split(self.vars["required"].get()),
             "core": _split(self.vars["core"].get()),
-            "optional": _split(self.vars["optional"].get()),
         }
         item["enemyFit"] = {}
         for tag, var in self.enemy_vars.items():
@@ -395,9 +630,8 @@ class PresetEditor:
             if value:
                 item["enemyFit"][tag] = value
         item["notes"] = self.notes.get("1.0", "end").strip()
-        self._refresh_list()
-        self.listbox.selection_clear(0, "end")
-        self.listbox.selection_set(self.current)
+        if refresh:
+            self._refresh_list(select=self.current)
         return True
 
     def add(self) -> None:
@@ -409,7 +643,7 @@ class PresetEditor:
                 "modes": [],
                 "core": {},
                 "minor": {},
-                "operators": {"required": [], "core": [], "optional": []},
+                "operators": {"required": [], "core": []},
                 "enemyFit": {},
                 "priority": 5,
                 "notes": "",
@@ -485,7 +719,7 @@ class PresetEditor:
             for cov in list(item.get("core") or {}) + list(item.get("minor") or {}):
                 if cov not in self.game.covenants:
                     return f"未知盟约：{cov}"
-            for op in sum((list((item.get("operators") or {}).get(k) or []) for k in ("required", "core", "optional")), []):
+            for op in sum((list((item.get("operators") or {}).get(k) or []) for k in ("required", "core")), []):
                 if op not in self.game.operators:
                     self._warnings.append(op)
         # Unknown operator names are common community nicknames; keep them,
