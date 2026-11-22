@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.4
+
+- 修复中文/非 ASCII 用户目录下自动更新报「找不到 ASPA.exe」的问题：更新脚本从 UTF-8 `.cmd` 改为带 BOM 的 PowerShell `.ps1`，不再经过 cmd 的 OEM 代码页。
+- 更新时只镜像 `_internal`，安装目录根部用 `/E` 覆盖，保留用户自己放在根部的预设/日志文件。
+- `update.json` / `version.json` 无 BOM 写出。
+- 开发流程改为本地 `dev` 分支开发，发布时合并到 `main` 并打 tag。
+
 ## v0.1.3
 
 - 自动更新替换文件时保留安装目录根部的用户文件（预设、日志、截图），不再用 `/MIR` 清空整个目录。
