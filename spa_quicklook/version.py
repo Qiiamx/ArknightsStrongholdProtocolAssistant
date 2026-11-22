@@ -9,7 +9,7 @@ from __future__ import annotations
 try:
     from ._build_version import __version__  # type: ignore
 except Exception:
-    __version__ = "0.1.4"
+    __version__ = "0.1.5"
 
 APP_NAME = "ASPA"
 
