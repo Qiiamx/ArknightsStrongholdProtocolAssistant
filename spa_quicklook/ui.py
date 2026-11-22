@@ -386,6 +386,7 @@ class SidePanel:
             child.destroy()
         self.cov_vars: dict[str, tk.BooleanVar] = {}
         self.cov_groups: dict[str, tuple[tk.Frame, tk.Button]] = {}
+        self.cov_group_headers: dict[str, tk.Frame] = {}
         if self.game is None:
             return
         for label, names in (("核心盟约", self._major_names()), ("附加盟约", self._minor_names())):
@@ -423,18 +424,27 @@ class SidePanel:
                     highlightthickness=0,
                 ).grid(row=i // 2, column=i % 2, sticky="w", padx=3, pady=0)
             self.cov_groups[label] = (grid, button)
+            self.cov_group_headers[label] = header
             if label in self.cov_collapsed:
                 grid.pack_forget()
         self._build_filter_options()
 
     def _toggle_cov_group(self, label: str) -> None:
+        grid, button = self.cov_groups[label]
         if label in self.cov_collapsed:
             self.cov_collapsed.discard(label)
+            # Reinsert core before the additional header instead of appending
+            # after it; this avoids rebuilding (and any white flash).
+            before = self.cov_group_headers.get("附加盟约") if label == "核心盟约" else None
+            if before is not None:
+                grid.pack(fill="x", padx=2, before=before)
+            else:
+                grid.pack(fill="x", padx=2)
+            button.configure(text="▾ " + label)
         else:
             self.cov_collapsed.add(label)
-        # Rebuild in canonical order (core first, additional second); using
-        # pack() on the old grid would append it after the additional group.
-        self._build_cov()
+            grid.pack_forget()
+            button.configure(text="▸ " + label)
 
     def _toggle_cov(self, name: str) -> None:
         self.cov_available[name] = self.cov_vars[name].get()
