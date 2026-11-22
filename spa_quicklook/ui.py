@@ -6,14 +6,18 @@ import tempfile
 import threading
 import tkinter as tk
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 from .capture import capture_client_area
 from .cli import _to_recognition_dict
+from .dialogs import CovenantCheckDialog, dark_scrollbar
+from .game import GameData, Recognition
 from .ocr import OcrEngine
 from .paths import counter_data_path, game_data_path, screenshots_dir
 from .recognize import read_image, recognize
+from .stackers import StackerPreset, effective_operator, remaining, tier_roman
 from .updater import UpdateInfo, check_latest, download_and_apply
 from .version import __version__
 from .winutil import find_game_window, is_minimized, is_window, set_dpi_aware, window_rect
@@ -49,7 +53,10 @@ class SidePanel:
         self.game = None
         self.last_rec: dict[str, Any] | None = None
         self.last_rec_dict: dict[str, Any] | None = None
-        self.last_result: dict[str, Any] | None = None
+        self.cov_available: dict[str, bool] = {}
+        self.filter_covs: set[str] = set()
+        self.selected_ops: set[str] = set()
+        self.updating = False
         self.update_info: UpdateInfo | None = None
 
         self.root = tk.Tk()
@@ -122,7 +129,7 @@ class SidePanel:
 
         self.edit_btn = tk.Button(
             self.header,
-            text="编辑阵容",
+            text="编辑叠层手",
             command=self._open_editor,
             bg=PANEL,
             fg=TEXT,
@@ -156,32 +163,66 @@ class SidePanel:
 
         body = tk.Frame(outer, bg=PANEL)
         body.pack(fill="both", expand=True, padx=10, pady=(0, 8))
-        self.text = tk.Text(
-            body,
-            wrap="word",
-            bg=PANEL,
-            fg=TEXT,
-            insertbackground=TEXT,
-            relief="flat",
-            bd=0,
-            padx=12,
-            pady=10,
-            font=FONT,
-            spacing1=1,
-            spacing3=3,
-            highlightthickness=0,
-        )
-        self.scroll = tk.Scrollbar(body, command=self.text.yview, bg=PANEL, troughcolor=PANEL, bd=0)
-        self.text.configure(yscrollcommand=self.scroll.set)
+        self.canvas = tk.Canvas(body, bg=PANEL, highlightthickness=0)
+        self.scroll = dark_scrollbar(body, command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scroll.set)
         self.scroll.pack(side="right", fill="y")
-        self.text.pack(side="left", fill="both", expand=True)
-        self.text.tag_configure("title", foreground=ACCENT, font=("Microsoft YaHei UI", 11, "bold"), spacing1=6)
-        self.text.tag_configure("body", foreground=TEXT)
-        self.text.tag_configure("dim", foreground=MUTED)
-        self.text.tag_configure("ok", foreground=OK)
-        self.text.tag_configure("bad", foreground=BAD)
-        self.text.tag_configure("warn", foreground=WARN)
-        self.text.configure(state="disabled")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.content = tk.Frame(self.canvas, bg=PANEL)
+        self._content_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw")
+        self.content.bind(
+            "<Configure>", lambda _e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.bind(
+            "<Configure>", lambda e: self.canvas.itemconfigure(self._content_window, width=e.width)
+        )
+        self.info = tk.Label(
+            self.content, text="等待截图", bg=PANEL, fg=ACCENT,
+            font=("Microsoft YaHei UI", 11, "bold"), anchor="w", justify="left", wraplength=300,
+        )
+        self.info.pack(fill="x", padx=10, pady=(10, 2))
+        self.detail = tk.Label(
+            self.content, text="", bg=PANEL, fg=MUTED, font=FONT_SMALL,
+            anchor="w", justify="left", wraplength=300,
+        )
+        self.detail.pack(fill="x", padx=10, pady=(0, 4))
+        self.cov_frame = tk.Frame(self.content, bg=PANEL)
+        self.cov_frame.pack(fill="x", padx=6, pady=(2, 0))
+        tools = tk.Frame(self.content, bg=PANEL)
+        tools.pack(fill="x", padx=10, pady=(4, 2))
+        tk.Button(
+            tools, text="全可", command=lambda: self._set_all_cov(True), bg=BG, fg=ACCENT,
+            activebackground=BORDER, activeforeground=TEXT, relief="flat", bd=0,
+            font=FONT_SMALL, padx=7, pady=3, cursor="hand2",
+        ).pack(side="left")
+        tk.Button(
+            tools, text="全禁", command=lambda: self._set_all_cov(False), bg=BG, fg=ACCENT,
+            activebackground=BORDER, activeforeground=TEXT, relief="flat", bd=0,
+            font=FONT_SMALL, padx=7, pady=3, cursor="hand2",
+        ).pack(side="left", padx=4)
+        self.filter_btn = tk.Button(
+            tools, text="筛选盟约", command=self._edit_filter, bg=BG, fg=ACCENT,
+            activebackground=BORDER, activeforeground=TEXT, relief="flat", bd=0,
+            font=FONT_SMALL, padx=8, pady=3, cursor="hand2",
+        )
+        self.filter_btn.pack(side="left", padx=6)
+        self.cov_label = tk.Label(
+            self.content, text="", bg=PANEL, fg=MUTED, font=FONT_SMALL,
+            anchor="w", justify="left", wraplength=300,
+        )
+        self.cov_label.pack(fill="x", padx=10, pady=(2, 0))
+        self.filter_label = tk.Label(
+            self.content, text="筛选：未选择（默认不显示干员）", bg=PANEL, fg=MUTED,
+            font=FONT_SMALL, anchor="w", justify="left", wraplength=300,
+        )
+        self.filter_label.pack(fill="x", padx=10, pady=(0, 2))
+        self.selected_label = tk.Label(
+            self.content, text="已选组合：未勾选", bg=PANEL, fg=OK,
+            font=("Microsoft YaHei UI", 10, "bold"), anchor="w", justify="left", wraplength=300,
+        )
+        self.selected_label.pack(fill="x", padx=10, pady=(2, 4))
+        self.ops_frame = tk.Frame(self.content, bg=PANEL)
+        self.ops_frame.pack(fill="both", expand=True, padx=4, pady=(0, 8))
 
         footer = tk.Frame(outer, bg=BG)
         footer.pack(fill="x", padx=10, pady=(0, 10))
@@ -204,7 +245,7 @@ class SidePanel:
 
         self.reload_btn = tk.Button(
             footer,
-            text="重载预设",
+            text="重载名单",
             command=self._reload_preset,
             bg=PANEL,
             fg=TEXT,
@@ -236,15 +277,7 @@ class SidePanel:
         )
         self.update_btn.pack(side="left", padx=(6, 0))
 
-        self._set_text(
-            [
-                ("等待截图", "title"),
-                ("把游戏停在「确认本局信息」页，点下方「截图识别」。", "body"),
-                ("工具只抓游戏客户区，不发送任何输入。", "dim"),
-                ("", "body"),
-                ("提示：窗口最小化时无法截图；点标题栏可拖动，点「贴边」恢复跟随。", "dim"),
-            ]
-        )
+        self._render_initial()
 
     def _bind_drag(self, widget: tk.Widget) -> None:
         widget.bind("<ButtonPress-1>", self._drag_start)
@@ -301,11 +334,12 @@ class SidePanel:
         try:
             self._find_game()
             if not self.hwnd:
-                self.status.configure(text="游戏未运行，等待窗口…", fg=WARN)
+                if not (self.updating or self.busy or self.update_info is not None):
+                    self.status.configure(text="游戏未运行；编辑/更新仍可用", fg=WARN)
                 self.root.deiconify()
-                self._text_if_empty()
             elif is_minimized(self.hwnd):
-                self.status.configure(text="游戏窗口已最小化，恢复后可截图", fg=WARN)
+                if not (self.updating or self.busy or self.update_info is not None):
+                    self.status.configure(text="游戏窗口已最小化，恢复后可截图", fg=WARN)
                 if self.root.state() == "withdrawn":
                     self.root.deiconify()
             else:
@@ -331,35 +365,230 @@ class SidePanel:
                 self._default_geometry()
 
     # -------------------------------------------------------------- content
-    def _set_text(self, parts: list[tuple[str, str]]) -> None:
-        self.text.configure(state="normal")
-        self.text.delete("1.0", "end")
-        for text, tag in parts:
-            self.text.insert("end", text + "\n", tag)
-        self.text.configure(state="disabled")
-        self.text.see("1.0")
+    def _major_names(self) -> list[str]:
+        return [c.name for c in self.game.majors] if self.game is not None else []
+
+    def _minor_names(self) -> list[str]:
+        return [c.name for c in self.game.minors] if self.game is not None else []
+
+    def _build_cov(self) -> None:
+        for child in self.cov_frame.winfo_children():
+            child.destroy()
+        self.cov_vars: dict[str, tk.BooleanVar] = {}
+        if self.game is None:
+            return
+        for label, names in (("核心盟约", self._major_names()), ("附加盟约", self._minor_names())):
+            tk.Label(
+                self.cov_frame, text=label, bg=PANEL, fg=ACCENT,
+                font=("Microsoft YaHei UI", 10, "bold"), anchor="w",
+            ).pack(fill="x", padx=4, pady=(4, 1))
+            grid = tk.Frame(self.cov_frame, bg=PANEL)
+            grid.pack(fill="x", padx=2)
+            grid.columnconfigure(0, weight=1)
+            grid.columnconfigure(1, weight=1)
+            for i, name in enumerate(names):
+                var = tk.BooleanVar(value=self.cov_available.get(name, False))
+                self.cov_vars[name] = var
+                tk.Checkbutton(
+                    grid,
+                    text=name,
+                    variable=var,
+                    command=lambda n=name: self._toggle_cov(n),
+                    anchor="w",
+                    bg=PANEL,
+                    fg=TEXT,
+                    activebackground=PANEL,
+                    activeforeground=ACCENT,
+                    selectcolor="#0a2024",
+                    font=FONT_SMALL,
+                    bd=0,
+                    highlightthickness=0,
+                ).grid(row=i // 2, column=i % 2, sticky="w", padx=3, pady=0)
+
+    def _toggle_cov(self, name: str) -> None:
+        self.cov_available[name] = self.cov_vars[name].get()
+        self._update_cov_label()
+        self._render_ops()
+
+    def _set_all_cov(self, value: bool) -> None:
+        for name, var in self.cov_vars.items():
+            var.set(value)
+            self.cov_available[name] = value
+        self._update_cov_label()
+        self._render_ops()
+
+    def _sync_cov_vars(self) -> None:
+        for name, var in self.cov_vars.items():
+            var.set(self.cov_available.get(name, False))
+
+    def _render_initial(self) -> None:
+        self.info.configure(text="等待截图")
+        self.detail.configure(
+            text="把游戏停在「确认本局信息」页，点「截图识别」。\n"
+            "没有截图也可以点「调整盟约」「筛选盟约」手动操作。"
+        )
+        self._update_cov_label()
+        self._update_filter_label()
+        self._update_selected_label()
+        self._clear_ops("先选择盟约筛选，或勾选已选干员。")
+
+    def _clear_ops(self, hint: str = "") -> None:
+        for child in self.ops_frame.winfo_children():
+            child.destroy()
+        if hint:
+            tk.Label(
+                self.ops_frame, text=hint, bg=PANEL, fg=MUTED, font=FONT_SMALL,
+                anchor="w", justify="left", wraplength=300,
+            ).pack(fill="x", padx=8, pady=10)
+
+    def _update_cov_label(self) -> None:
+        majors = self._major_names()
+        minors = self._minor_names()
+        if not majors and not minors:
+            self.cov_label.configure(text="盟约：数据未加载")
+            return
+        ma = sum(1 for n in majors if self.cov_available.get(n))
+        mi = sum(1 for n in minors if self.cov_available.get(n))
+        self.cov_label.configure(text=f"盟约：大 {ma}/{len(majors)} 可用 · 小 {mi}/{len(minors)} 可用")
+
+    def _update_filter_label(self) -> None:
+        if not self.filter_covs:
+            self.filter_label.configure(text="筛选：未选择（默认不显示干员）", fg=MUTED)
+        else:
+            text = "、".join(sorted(self.filter_covs))
+            self.filter_label.configure(text=f"筛选：{text}", fg=ACCENT)
+
+    def _update_selected_label(self) -> None:
+        if not self.selected_ops or self.game is None:
+            self.selected_label.configure(text="已选组合：未勾选")
+            return
+        try:
+            preset = StackerPreset.load(self.preset_path, self.game)
+        except Exception:
+            preset = StackerPreset(self.preset_path, [], {})
+        counts: Counter[str] = Counter()
+        for name in self.selected_ops:
+            op = effective_operator(self.game, name, preset)
+            if op is None:
+                continue
+            counts.update(op.covenants)
+        if not counts:
+            self.selected_label.configure(text="已选组合：—")
+            return
+        text = "  ".join(f"{count}{name}" for name, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+        self.selected_label.configure(text=f"已选组合：{text}")
+
+    def _recognition(self) -> Recognition:
+        return Recognition(
+            major_banned={n for n in self._major_names() if not self.cov_available.get(n)},
+            minor_banned={n for n in self._minor_names() if not self.cov_available.get(n)},
+        )
+
+    def _apply_recognition(self, rec: dict) -> None:
+        self.cov_available = {name: False for name in self._major_names() + self._minor_names()}
+        cov = rec.get("covenants") or {}
+        for cls in ("major", "minor"):
+            part = cov.get(cls) or {}
+            for name in part.get("available") or []:
+                if name in self.cov_available:
+                    self.cov_available[name] = True
+            for name in part.get("disabled") or []:
+                if name in self.cov_available:
+                    self.cov_available[name] = False
+        self._sync_cov_vars()
+        self._update_cov_label()
+        self._render_ops()
+
+    def _edit_filter(self) -> None:
+        if self.game is None:
+            self.status.configure(text="数据未加载，无法筛选", fg=BAD)
+            return
+        dialog = CovenantCheckDialog(
+            self.root,
+            "按盟约筛选",
+            {"核心盟约": self._major_names(), "附加盟约": self._minor_names()},
+            self.filter_covs,
+            "勾选要查看的盟约；默认不选任何盟约，因此不显示干员。已勾选干员始终保留。",
+        )
+        result = dialog.show()
+        if result is None:
+            return
+        self.filter_covs = set(result)
+        self._update_filter_label()
+        self._render_ops()
+
+    def _toggle_operator(self, name: str, var: tk.BooleanVar) -> None:
+        if var.get():
+            self.selected_ops.add(name)
+        else:
+            self.selected_ops.discard(name)
+        self._update_selected_label()
+        self._render_ops()
+
+    def _render_ops(self) -> None:
+        self._update_selected_label()
+        self._clear_ops()
+        if self.game is None:
+            self._clear_ops("干员数据未加载。")
+            return
+        try:
+            preset = StackerPreset.load(self.preset_path, self.game)
+        except Exception as exc:
+            self._clear_ops(f"读取叠层手名单失败：{exc}")
+            return
+        rows, _banned, _unknown = remaining(self.game, self._recognition(), preset)
+        available = {op.name for op in rows}
+        self.selected_ops &= available
+        shown = [
+            op
+            for op in rows
+            if op.name in self.selected_ops
+            or (self.filter_covs and set(op.covenants) & self.filter_covs)
+        ]
+        shown.sort(key=lambda op: (op.name not in self.selected_ops, -op.tier, op.name))
+        if not shown:
+            if self.filter_covs:
+                self._clear_ops("当前筛选下没有剩余叠层手。")
+            else:
+                self._clear_ops("先选择盟约筛选，或勾选已选干员。")
+            return
+        for op in shown:
+            var = tk.BooleanVar(value=op.name in self.selected_ops)
+            cb = tk.Checkbutton(
+                self.ops_frame,
+                text=f"{tier_roman(op.tier)}   {op.name}",
+                variable=var,
+                command=lambda n=op.name, v=var: self._toggle_operator(n, v),
+                anchor="w",
+                bg=PANEL,
+                fg=TEXT,
+                activebackground=PANEL,
+                activeforeground=ACCENT,
+                selectcolor="#0a2024",
+                font=FONT,
+                bd=0,
+                highlightthickness=0,
+            )
+            cb.pack(fill="x", padx=8, pady=1)
+        self._update_selected_label()
 
     def _text_if_empty(self) -> None:
-        if not self.last_rec:
-            self._set_text(
-                [
-                    ("等待游戏窗口", "title"),
-                    ("启动明日方舟后，把游戏停在「确认本局信息」页。", "body"),
-                    ("本面板会自动贴到游戏右侧。", "dim"),
-                ]
-            )
+        """Kept for the window tick; content is now manual/state driven."""
+        return
 
     def _load_game_data(self) -> None:
         try:
-            from .recommender import GameData
-
             self.game = GameData(game_data_path(), counter_data_path())
+            self._build_cov()
+            if self.last_rec is None:
+                self._render_initial()
         except Exception as exc:
             self.status.configure(text=f"数据加载失败：{exc}", fg=BAD)
             self.game = None
 
     def _reload_preset(self) -> None:
-        self.status.configure(text="预设已重载（下次识别生效）", fg=MUTED)
+        self.status.configure(text="叠层手名单已重载", fg=MUTED)
+        self._render_ops()
 
     def _auto_check_update(self) -> None:
         if not getattr(sys, "frozen", False):
@@ -400,9 +629,10 @@ class SidePanel:
             self.status.configure(text="已是最新版本" if manual else "更新检查完成", fg=MUTED)
 
     def _update_failed(self, message: str, manual: bool) -> None:
+        self.updating = False
         self.update_btn.configure(state="normal", text="更新")
         if manual:
-            self.status.configure(text=f"检查更新失败：{message[:60]}", fg=BAD)
+            self.status.configure(text=f"更新失败：{message[:80]}", fg=BAD)
 
     def _download_update(self) -> None:
         if self.update_info is None:
@@ -417,11 +647,27 @@ class SidePanel:
             return
         self.status.configure(text="下载更新中…", fg=WARN)
         self.update_btn.configure(state="disabled")
+        self.updating = True
         info = self.update_info
+
+        def progress(received: int, total: int | None) -> None:
+            mb = received / (1024 * 1024)
+            if total:
+                percent = min(100, int(received * 100 / total))
+                text = f"下载更新 {percent}%（{mb:.1f}/{total / 1024 / 1024:.1f} MB）"
+            else:
+                text = f"下载更新中… {mb:.1f} MB"
+            self.root.after(0, lambda: self.status.configure(text=text, fg=WARN))
 
         def worker() -> None:
             try:
-                download_and_apply(info, on_status=lambda text: self.root.after(0, lambda: self.status.configure(text=text, fg=WARN)))
+                download_and_apply(
+                    info,
+                    on_status=lambda text: self.root.after(
+                        0, lambda: self.status.configure(text=text, fg=WARN)
+                    ),
+                    on_progress=progress,
+                )
                 self.root.after(800, self.close)
             except Exception as exc:
                 message = str(exc)
@@ -474,11 +720,7 @@ class SidePanel:
                 raise RuntimeError("；".join(rec.get("warnings") or ["未识别到确认本局信息"]))
 
             rec_dict, _ = _to_recognition_dict(rec)
-            from .recommender import Preset, Recognition, recommend
-
-            preset = Preset.load(self.preset_path)
-            result = recommend(self.game, Recognition.from_dict(rec_dict), preset)
-            self.root.after(0, lambda: self._show_result(rec, rec_dict, result))
+            self.root.after(0, lambda: self._show_result(rec, rec_dict))
         except Exception as exc:
             message = str(exc)
             self.root.after(0, lambda: self._show_error(message))
@@ -495,73 +737,23 @@ class SidePanel:
     def _show_error(self, message: str) -> None:
         self.busy = False
         self.scan_btn.configure(state="normal", text="截图识别")
-        self.status.configure(text="识别失败", fg=BAD)
-        self._set_text(
-            [
-                ("识别失败", "title"),
-                (message, "bad"),
-                ("", "body"),
-                ("请停在「确认本局信息」页、窗口不要最小化；调试图：shots\\last_scan_debug.png", "dim"),
-            ]
+        self.status.configure(text="识别失败；可手动调整盟约", fg=BAD)
+        self.info.configure(text="识别失败")
+        self.detail.configure(
+            text=f"{message}\n可点「调整盟约」手动设置本局状态，不依赖截图。"
         )
 
-    def _show_result(self, rec: dict, rec_dict: dict, result: dict) -> None:
+    def _show_result(self, rec: dict, rec_dict: dict) -> None:
         self.busy = False
-        self.last_rec, self.last_rec_dict, self.last_result = rec, rec_dict, result
+        self.last_rec, self.last_rec_dict = rec, rec_dict
         self.scan_btn.configure(state="normal", text="截图识别")
         self.status.configure(text=f"识别完成 · 置信度 {rec.get('confidence')}", fg=MUTED)
-        parts: list[tuple[str, str]] = []
-
         enemy = rec.get("enemy") or {}
-        parts.append(("本次识别", "title"))
-        parts.append((f"敌人：{enemy.get('leader') or '—'} · {'/'.join(enemy.get('tags') or []) or '未读到'}", "body"))
-        major = rec["covenants"]["major"]
-        minor = rec["covenants"]["minor"]
-        parts.append(("核心可用：" + ("、".join(major["available"]) or "—"), "ok"))
-        parts.append(("核心禁用：" + ("、".join(major["disabled"]) or "—"), "bad"))
-        if major["unknown"]:
-            parts.append(("核心未识别：" + "、".join(major["unknown"]), "warn"))
-        if minor["available"] or minor["disabled"]:
-            parts.append(("附加可用：" + ("、".join(minor["available"]) or "—"), "ok"))
-            parts.append(("附加禁用：" + ("、".join(minor["disabled"]) or "—"), "bad"))
-        else:
-            parts.append(("附加盟约未显示：滚动准备页后重新截图", "warn"))
-
-        parts.append(("", "body"))
-        parts.append(("本次推荐", "title"))
-        items = result.get("recommendations") or []
-        shown = 0
-        for item in items:
-            if shown >= 3:
-                break
-            if not item.get("feasible") and shown >= 1:
-                continue
-            mark = "[OK]" if item.get("feasible") else "[X]"
-            tag = "ok" if item.get("feasible") else "bad"
-            parts.append((f"{shown + 1}. {mark} {item['name']}  {item['score']:.2f}", tag))
-            core = [x["covenant"] for x in item.get("core_plan") or [] if x.get("ok")]
-            extra = [x["covenant"] for x in item.get("minor_plan") or [] if x.get("ok")]
-            if core:
-                parts.append(("   主：" + "、".join(core), "body"))
-            if extra:
-                parts.append(("   副：" + "、".join(extra), "body"))
-            for reason in (item.get("reasons") or [])[:2]:
-                parts.append(("   " + reason, "dim"))
-            for warning in (item.get("warnings") or [])[:2]:
-                parts.append(("   ! " + warning, "warn"))
-            if item.get("rejected_because"):
-                parts.append(("   拒绝：" + item["rejected_because"], "bad"))
-            shown += 1
-        if shown == 0:
-            parts.append(("没有可用预设；点「编辑阵容」或查看下方盟约备选。", "warn"))
-            plan = result.get("covenant_plan") or {}
-            if plan.get("core"):
-                parts.append(("大盟约备选：" + "、".join(x["covenant"] for x in plan["core"]), "body"))
-            if plan.get("minor"):
-                parts.append(("小盟约备选：" + "、".join(x["covenant"] for x in plan["minor"]), "body"))
-        for warning in result.get("warnings") or []:
-            parts.append(("[!] " + warning, "warn"))
-        self._set_text(parts)
+        self.info.configure(text="本次识别")
+        self.detail.configure(
+            text=f"敌人：{enemy.get('leader') or '—'} · {'/'.join(enemy.get('tags') or []) or '未读到'}"
+        )
+        self._apply_recognition(rec)
 
     # -------------------------------------------------------------- editor
     def _open_editor(self) -> None:
@@ -579,16 +771,11 @@ class SidePanel:
         if path is not None:
             self.preset_path = Path(path)
         self.preset_label.configure(text=self.preset_path.name)
-        self.status.configure(text="预设已保存", fg=MUTED)
-        if self.last_rec and self.last_rec_dict and self.game is not None:
-            try:
-                from .recommender import Preset, Recognition, recommend
-
-                preset = Preset.load(self.preset_path)
-                result = recommend(self.game, Recognition.from_dict(self.last_rec_dict), preset)
-                self._show_result(self.last_rec, self.last_rec_dict, result)
-            except Exception as exc:
-                self.status.configure(text=f"预设重算失败：{exc}", fg=BAD)
+        self.status.configure(text="叠层手名单已保存", fg=MUTED)
+        if self.last_rec is not None and self.last_rec_dict is not None:
+            self._show_result(self.last_rec, self.last_rec_dict)
+        else:
+            self._render_ops()
 
     def close(self) -> None:
         self.closed = True

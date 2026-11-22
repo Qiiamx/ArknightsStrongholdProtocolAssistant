@@ -41,7 +41,7 @@ git merge main
 python -m venv .build-venv
 .\.build-venv\Scripts\python.exe -m pip install -r packaging\requirements-build.txt
 powershell -ExecutionPolicy Bypass -File packaging\build_release.ps1 `
-  -Version 0.1.5 -Repo Qiiamx/ArknightsStrongholdProtocolAssistant `
+  -Version 0.2.0 -Repo Qiiamx/ArknightsStrongholdProtocolAssistant `
   -PythonExe .\.build-venv\Scripts\python.exe
 ```
 

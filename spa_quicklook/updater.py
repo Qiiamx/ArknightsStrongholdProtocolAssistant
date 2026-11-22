@@ -11,7 +11,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -109,7 +108,7 @@ def _ps_quote(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-def download_and_apply(info: UpdateInfo, on_status=None) -> None:
+def download_and_apply(info: UpdateInfo, on_status=None, on_progress=None) -> None:
     if not getattr(sys, "frozen", False):
         raise RuntimeError("仅发布版支持自动更新")
     ensure_user_dir()
@@ -118,7 +117,19 @@ def download_and_apply(info: UpdateInfo, on_status=None) -> None:
     if on_status:
         on_status("下载更新中…")
     with _opener().open(info.asset_url, timeout=180) as resp, open(zip_path, "wb") as f:
-        shutil.copyfileobj(resp, f)
+        raw_total = resp.headers.get("Content-Length")
+        total = int(raw_total) if raw_total and str(raw_total).isdigit() else None
+        received = 0
+        while True:
+            chunk = resp.read(64 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+            received += len(chunk)
+            if on_progress:
+                on_progress(received, total)
+    if on_progress:
+        on_progress(zip_path.stat().st_size, zip_path.stat().st_size)
     if info.sha_url:
         if on_status:
             on_status("校验更新包…")
