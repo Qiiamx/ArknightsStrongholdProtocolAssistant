@@ -428,15 +428,13 @@ class SidePanel:
         self._build_filter_options()
 
     def _toggle_cov_group(self, label: str) -> None:
-        grid, button = self.cov_groups[label]
         if label in self.cov_collapsed:
             self.cov_collapsed.discard(label)
-            grid.pack(fill="x", padx=2)
-            button.configure(text="▾ " + label)
         else:
             self.cov_collapsed.add(label)
-            grid.pack_forget()
-            button.configure(text="▸ " + label)
+        # Rebuild in canonical order (core first, additional second); using
+        # pack() on the old grid would append it after the additional group.
+        self._build_cov()
 
     def _toggle_cov(self, name: str) -> None:
         self.cov_available[name] = self.cov_vars[name].get()
