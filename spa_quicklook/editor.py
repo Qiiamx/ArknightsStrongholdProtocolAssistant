@@ -354,15 +354,16 @@ class PresetEditor:
         ).grid(row=r, column=2, sticky="w", padx=(0, 12))
         r += 1
 
-        for label, key in (("必选干员", "required"), ("核心干员", "core"), ("可选干员", "optional")):
+        for label, key in (("必选干员", "required"), ("核心干员", "core")):
             self._label_with_help(
                 form,
                 label,
                 r,
                 0,
                 help_text=(
-                    "干员被禁的固定扣分（不受权重影响）：核心干员 -2/个，可选干员 -0.5/个；"
-                    "必选干员被禁则整条阵容不推荐。"
+                    "干员被禁的固定扣分（不受权重影响）：核心干员 -2/个；"
+                    "必选干员被禁则整条阵容不推荐。\n"
+                    "是否被禁由「全局权重 → 干员可用性规则」判定。"
                 ),
             )
             var = tk.StringVar()
@@ -376,6 +377,13 @@ class PresetEditor:
                 relief="flat", bd=0, font=FONT_SMALL, padx=6, pady=2, cursor="hand2",
             ).grid(row=r, column=2, sticky="w", padx=(0, 12))
             r += 1
+
+        tk.Label(
+            form,
+            text="可用性判定：必选/核心干员 → 「全局权重 → 干员可用性规则」；主核心与盟约目标直接使用本局识别结果。",
+            bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=660, justify="left",
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=12, pady=(2, 4))
+        r += 1
 
         self._label_with_help(
             form,
@@ -487,7 +495,7 @@ class PresetEditor:
         scope = self.data.setdefault("scope", {})
         self._label_with_help(
             frame,
-            "可用性规则",
+            "干员可用性规则（全局）",
             4,
             0,
             padx=12,
@@ -495,8 +503,9 @@ class PresetEditor:
             fg=TEXT,
             font=FONT,
             help_text=(
-                "决定“哪些干员/盟约被视为被禁”，不是数值权重：\n"
-                "· anyCoreBanned：任意核心被禁 → 视为不可用（默认，最保守）；\n"
+                "只作用于干员：按干员自身的核心/附加盟约判断该干员是否被视为被禁。\n"
+                "不改变主核心、核心盟约目标、附加盟约目标的判定——这些直接用本局识别结果。\n"
+                "· anyCoreBanned：任意核心被禁 → 该干员视为不可用（默认，最保守）；\n"
                 "· allCoresBanned：全部核心都被禁 → 才视为不可用；\n"
                 "· coreAndAdditionalBanned：核心和附加都有被禁 → 才视为不可用。"
             ),
@@ -511,7 +520,7 @@ class PresetEditor:
         ).grid(row=4, column=1, sticky="w", padx=12)
         tk.Label(
             frame,
-            text="默认 anyCoreBanned；识别到「本局禁用干员」列表时以列表为准（当前未读头像）。",
+            text="默认 anyCoreBanned；只作用于必选/核心干员，主核心与盟约目标不使用它。识别到「本局禁用干员」列表时以列表为准（当前未读头像）。",
             bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=620, justify="left",
         ).grid(row=5, column=0, columnspan=2, sticky="w", padx=12, pady=(0, 8))
         tk.Label(
@@ -519,7 +528,7 @@ class PresetEditor:
             text=(
                 "最终评分 = 优先级权重×优先级 + 敌人权重×词条和 + 激活权重×激活质量 + 抗ban权重×抗ban比例\n"
                 "固定扣分（不受权重影响）：核心盟约被禁 -2/个，附加盟约被禁 -1/个，"
-                "核心干员被禁 -2/个，可选干员被禁 -0.5/个；主核心/必选干员被禁或模式不匹配则整条不推荐。"
+                "核心干员被禁 -2/个；主核心/必选干员被禁或模式不匹配则整条不推荐。"
             ),
             bg=PANEL, fg=MUTED, font=FONT_SMALL, wraplength=680, justify="left",
         ).grid(row=6, column=0, columnspan=2, sticky="w", padx=12, pady=(10, 4))
@@ -576,8 +585,11 @@ class PresetEditor:
         self.minor_targets = dict(item.get("minor") or {})
         ops = item.get("operators") or {}
         self.vars["required"].set("，".join(ops.get("required") or []))
-        self.vars["core"].set("，".join(ops.get("core") or []))
-        self.vars["optional"].set("，".join(ops.get("optional") or []))
+        core_ops = list(ops.get("core") or [])
+        for name in ops.get("optional") or []:
+            if name not in core_ops:
+                core_ops.append(name)
+        self.vars["core"].set("，".join(core_ops))
         for tag in ENEMY_TAGS:
             self.enemy_vars[tag].set(str((item.get("enemyFit") or {}).get(tag, 0)))
         self.notes.delete("1.0", "end")
@@ -608,7 +620,6 @@ class PresetEditor:
         item["operators"] = {
             "required": _split(self.vars["required"].get()),
             "core": _split(self.vars["core"].get()),
-            "optional": _split(self.vars["optional"].get()),
         }
         item["enemyFit"] = {}
         for tag, var in self.enemy_vars.items():
@@ -632,7 +643,7 @@ class PresetEditor:
                 "modes": [],
                 "core": {},
                 "minor": {},
-                "operators": {"required": [], "core": [], "optional": []},
+                "operators": {"required": [], "core": []},
                 "enemyFit": {},
                 "priority": 5,
                 "notes": "",
@@ -708,7 +719,7 @@ class PresetEditor:
             for cov in list(item.get("core") or {}) + list(item.get("minor") or {}):
                 if cov not in self.game.covenants:
                     return f"未知盟约：{cov}"
-            for op in sum((list((item.get("operators") or {}).get(k) or []) for k in ("required", "core", "optional")), []):
+            for op in sum((list((item.get("operators") or {}).get(k) or []) for k in ("required", "core")), []):
                 if op not in self.game.operators:
                     self._warnings.append(op)
         # Unknown operator names are common community nicknames; keep them,
