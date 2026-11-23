@@ -14,7 +14,13 @@ from typing import Any, Callable
 from .dialogs import CovenantCheckDialog, dark_scrollbar
 from .game import GameData
 from .paths import load_settings, save_settings, settings_path
-from .stackers import StackerPreset, all_stackers, effective_operator, group_by_tier, tier_roman
+from .stackers import (
+    StackerPreset,
+    all_operators,
+    effective_operator,
+    group_by_tier,
+    tier_roman,
+)
 
 BG = "#0c161a"
 PANEL = "#112328"
@@ -42,7 +48,7 @@ class PresetEditor:
         self.data = StackerPreset.load(self.path, game)
         self.settings = load_settings()
         self.proxy_var = tk.StringVar(value=str(self.settings.get("proxy") or ""))
-        self.stackers = all_stackers(game)
+        self.operators = all_operators(game)
         self.selected = set(self.data.names)
         self.overrides = dict(self.data.overrides)
         self.vars: dict[str, tk.BooleanVar] = {}
@@ -99,8 +105,9 @@ class PresetEditor:
 
         tk.Label(
             self.tab_stack,
-            text="勾选本局要关注的叠层手。识别后侧栏只展示名单里没被 ban 的；名单外的干员不会出现。",
-            bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w",
+            text="这里列出本季全部干员（按等级分组，右侧依次是实际盟约和特质）。勾选 = 识别后侧栏展示；"
+            "没勾的不会出现，被 ban 的自动隐藏。",
+            bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w", wraplength=900, justify="left",
         ).pack(fill="x", padx=12, pady=(8, 4))
         tk.Label(
             self.tab_stack,
@@ -184,15 +191,16 @@ class PresetEditor:
             self.canvas.yview_scroll(delta, "units")
         return "break"
 
-    def _visible_stackers(self):
+    def _visible_operators(self):
         query = self.search_var.get().strip().lower() if hasattr(self, "search_var") else ""
         if not query:
-            return self.stackers
+            return self.operators
         return [
             op
-            for op in self.stackers
+            for op in self.operators
             if query in op.name.lower()
             or any(query in c.lower() for c in op.covenants)
+            or query in (op.trait_type or "").lower()
             or query == tier_roman(op.tier).lower()
         ]
 
@@ -200,7 +208,7 @@ class PresetEditor:
         for child in self.list_frame.winfo_children():
             child.destroy()
         self.vars = {}
-        visible = self._visible_stackers()
+        visible = self._visible_operators()
         groups = group_by_tier(visible)
         temp_preset = StackerPreset(self.path, [], self.overrides)
         for tier, ops in groups:
@@ -241,6 +249,10 @@ class PresetEditor:
                     highlightthickness=0,
                 )
                 cb.pack(side="left")
+                tk.Label(
+                    cell, text=op.trait_type or "—", bg=PANEL, fg=MUTED,
+                    font=FONT_SMALL, width=5, anchor="w",
+                ).pack(side="left", padx=(4, 2))
                 effective = effective_operator(self.game, op.name, temp_preset) or op
                 cov_text = "/".join(effective.covenants) or "无盟约"
                 tk.Button(
@@ -261,7 +273,7 @@ class PresetEditor:
                 ).pack(side="left", padx=(2, 0))
         if not groups:
             tk.Label(
-                self.list_frame, text="没有匹配的叠层手", bg=PANEL, fg=MUTED, font=FONT
+                self.list_frame, text="没有匹配的干员", bg=PANEL, fg=MUTED, font=FONT
             ).pack(anchor="w", padx=12, pady=20)
         self._update_count()
 
@@ -299,12 +311,12 @@ class PresetEditor:
         self._update_count()
 
     def _update_count(self) -> None:
-        total = len(self.stackers)
+        total = len(self.operators)
         self.count_label.configure(text=f"已选 {len(self.selected)} / {total}")
         self.status.configure(text=f"名单 {len(self.selected)} 人；勾选后点保存", fg=MUTED)
 
     def select_all(self) -> None:
-        for op in self.stackers:
+        for op in self.operators:
             self.selected.add(op.name)
         self._refresh()
 
@@ -314,7 +326,7 @@ class PresetEditor:
 
     # ------------------------------------------------------------ save
     def _names_in_order(self) -> list[str]:
-        return [op.name for op in self.stackers if op.name in self.selected]
+        return [op.name for op in self.operators if op.name in self.selected]
 
     def save(self) -> None:
         try:
@@ -334,7 +346,7 @@ class PresetEditor:
     def save_as(self) -> None:
         path = filedialog.asksaveasfilename(
             parent=self.win,
-            title="另存叠层手名单",
+            title="另存名单",
             defaultextension=".json",
             filetypes=[("JSON", "*.json"), ("所有文件", "*.*")],
             initialfile=self.path.name,

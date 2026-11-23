@@ -17,7 +17,13 @@ from .game import GameData, Recognition
 from .ocr import OcrEngine
 from .paths import counter_data_path, game_data_path, screenshots_dir
 from .recognize import read_image, recognize
-from .stackers import StackerPreset, effective_operator, remaining, tier_roman
+from .stackers import (
+    StackerPreset,
+    effective_operator,
+    matches_covenant_filter,
+    remaining,
+    tier_roman,
+)
 from .updater import UpdateInfo, check_latest, download_and_apply
 from .version import __version__
 from .winutil import find_game_window, is_minimized, is_window, set_dpi_aware, window_rect
@@ -449,7 +455,6 @@ class SidePanel:
     def _toggle_cov(self, name: str) -> None:
         self.cov_available[name] = self.cov_vars[name].get()
         self._update_cov_label()
-        self._build_filter_options()
         self._render_ops()
 
     def _set_all_cov(self, value: bool) -> None:
@@ -457,7 +462,6 @@ class SidePanel:
             var.set(value)
             self.cov_available[name] = value
         self._update_cov_label()
-        self._build_filter_options()
         self._render_ops()
 
     def _sync_cov_vars(self) -> None:
@@ -468,17 +472,18 @@ class SidePanel:
         for child in self.filter_frame.winfo_children():
             child.destroy()
         self.filter_vars: dict[str, tk.BooleanVar] = {}
-        available = [n for n in self._major_names() + self._minor_names() if self.cov_available.get(n)]
-        self.filter_covs &= set(available)
-        if not available:
-            self.filter_label.configure(text="筛选：先勾选上方可用盟约")
+        # 筛选按全盟约：本局禁用的盟约也列出来，不受上方勾选影响。
+        names = self._major_names() + self._minor_names()
+        self.filter_covs &= set(names)
+        if not names:
+            self.filter_label.configure(text="筛选：盟约数据未加载")
             return
-        self.filter_label.configure(text="筛选（默认不选，点击平铺项）：")
+        self.filter_label.configure(text="筛选（全部盟约，选多个要同时满足）：")
         grid = tk.Frame(self.filter_frame, bg=PANEL)
         grid.pack(fill="x", padx=2)
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
-        for i, name in enumerate(available):
+        for i, name in enumerate(names):
             var = tk.BooleanVar(value=name in self.filter_covs)
             self.filter_vars[name] = var
             tk.Checkbutton(
@@ -573,7 +578,6 @@ class SidePanel:
                     self.cov_available[name] = False
         self._sync_cov_vars()
         self._update_cov_label()
-        self._build_filter_options()
         self._render_ops()
 
     def _toggle_operator(self, name: str, var: tk.BooleanVar) -> None:
@@ -601,13 +605,12 @@ class SidePanel:
         shown = [
             op
             for op in rows
-            if op.name in self.selected_ops
-            or (self.filter_covs and set(op.covenants) & self.filter_covs)
+            if op.name in self.selected_ops or matches_covenant_filter(op, self.filter_covs)
         ]
         shown.sort(key=lambda op: (op.name not in self.selected_ops, -op.tier, op.name))
         if not shown:
             if self.filter_covs:
-                self._clear_ops("当前筛选下没有剩余叠层手。")
+                self._clear_ops("没有同时满足所选盟约的剩余干员。")
             else:
                 self._clear_ops("先选择盟约筛选，或勾选已选干员。")
             return
