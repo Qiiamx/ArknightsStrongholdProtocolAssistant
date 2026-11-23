@@ -17,6 +17,7 @@ from .paths import load_settings, save_settings, settings_path
 from .stackers import (
     StackerPreset,
     all_operators,
+    default_names,
     effective_operator,
     group_by_tier,
     tier_roman,
@@ -151,7 +152,7 @@ class PresetEditor:
         for text, cmd in (
             ("全选", self.select_all),
             ("反选", self.invert),
-            ("清空", self.clear),
+            ("重置", self.reset),
         ):
             tk.Button(
                 bar, text=text, command=cmd, bg=PANEL, fg=TEXT, relief="flat", bd=0,
@@ -319,10 +320,17 @@ class PresetEditor:
         self.count_label.configure(text=f"已选 {len(self.selected)} / {total}")
         self.status.configure(text=f"名单 {len(self.selected)} 人；勾选后点保存", fg=MUTED)
 
+    def _sync_checks(self, note: str = "") -> None:
+        """只改勾选状态，不重建列表（重建会白闪一下）。"""
+        for name, var in self.vars.items():
+            var.set(name in self.selected)
+        self._update_count()
+        if note:
+            self.status.configure(text=note, fg=MUTED)
+
     def select_all(self) -> None:
-        for op in self.operators:
-            self.selected.add(op.name)
-        self._refresh()
+        self.selected = {op.name for op in self.operators}
+        self._sync_checks(f"已全选 {len(self.selected)} 人；点保存写入")
 
     def invert(self) -> None:
         """反选：已勾的取消，没勾的勾上（对整份名单，不受搜索影响）。"""
@@ -331,11 +339,12 @@ class PresetEditor:
                 self.selected.discard(op.name)
             else:
                 self.selected.add(op.name)
-        self._refresh()
+        self._sync_checks(f"已反选，现在 {len(self.selected)} 人；点保存写入")
 
-    def clear(self) -> None:
-        self.selected.clear()
-        self._refresh()
+    def reset(self) -> None:
+        """重置：勾选恢复成默认名单（持续叠加的叠层手），不写文件。"""
+        self.selected = set(default_names(self.game))
+        self._sync_checks(f"已重置为默认名单（{len(self.selected)} 人）；点保存写入")
 
     # ------------------------------------------------------------ save
     def _names_in_order(self) -> list[str]:
