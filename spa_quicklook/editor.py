@@ -148,7 +148,11 @@ class PresetEditor:
         )
         search.pack(side="left", padx=6)
         self.search_var.trace_add("write", lambda *_: self._refresh())
-        for text, cmd in (("全选", self.select_all), ("清空", self.clear)):
+        for text, cmd in (
+            ("全选", self.select_all),
+            ("反选", self.invert),
+            ("清空", self.clear),
+        ):
             tk.Button(
                 bar, text=text, command=cmd, bg=PANEL, fg=TEXT, relief="flat", bd=0,
                 font=FONT_SMALL, padx=10, pady=3, cursor="hand2",
@@ -318,6 +322,15 @@ class PresetEditor:
     def select_all(self) -> None:
         for op in self.operators:
             self.selected.add(op.name)
+        self._refresh()
+
+    def invert(self) -> None:
+        """反选：已勾的取消，没勾的勾上（对整份名单，不受搜索影响）。"""
+        for op in self.operators:
+            if op.name in self.selected:
+                self.selected.discard(op.name)
+            else:
+                self.selected.add(op.name)
         self._refresh()
 
     def clear(self) -> None:
