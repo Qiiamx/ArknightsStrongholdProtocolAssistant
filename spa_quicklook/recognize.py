@@ -446,12 +446,22 @@ def _read_grouped_core(
         text = _compact(line.text)
         if not text or "盟约" in text:
             continue
+        # One OCR box can hold several labels ("伊比利亚莱塔尼亚维多利亚");
+        # keep every name it contains, not just the first match.
+        found: list[tuple[int, str]] = []
         for name in sorted(MAJORS, key=len, reverse=True):
             idx = _find_name(text, name)
             if idx >= 0:
-                x = line.x + line.w * (idx + len(name) / 2.0) / max(len(text), 1)
-                items.append((name, x, line.cy))
-                break
+                found.append((idx, name))
+        found.sort()
+        chosen: list[tuple[int, str]] = []
+        for idx, name in found:
+            if any(abs(idx - i) < len(n) for i, n in chosen):
+                continue
+            chosen.append((idx, name))
+        for idx, name in chosen:
+            x = line.x + line.w * (idx + len(name) / 2.0) / max(len(text), 1)
+            items.append((name, x, line.cy))
     if len(items) < 4:
         return None
 
@@ -624,10 +634,13 @@ def recognize(image_bgr: np.ndarray, ocr: OcrEngine, debug_path: Path | str | No
     core_available: list[str] = []
     core_disabled: list[str] = []
     core_unknown: list[str] = list(MAJORS)
-    grouped_core = _read_grouped_core(image_bgr, lines, add_title, h)
-    if grouped_core is not None:
-        core_available, core_disabled, core_unknown = grouped_core
-    elif core_title is not None and add_title is not None:
+    core_icon_y = 0.0
+    # Two ways to read the core strip; keep both and take the one that explains
+    # more slots.  OCR merges neighbouring labels into one box fairly often
+    # (e.g. 「伊比利亚莱塔尼亚维多利亚」), so the title-anchored path that splits
+    # a merged box by column is preferred whenever the title is on screen.
+    measured_core: tuple[list[str], list[str], list[str]] | None = None
+    if core_title is not None and add_title is not None:
         # The real prep page indents the covenant strip; title-derived x is only
         # a fallback.  Measure the icon row from pixels and columns from names.
         core_icon_y = (
@@ -641,11 +654,19 @@ def recognize(image_bgr: np.ndarray, ocr: OcrEngine, debug_path: Path | str | No
                 image_bgr, lines, MAJORS, core_label_y, core_icon_y, rows=1, row_spacing=grid.row_spacing, band=band
             )
         if core_measured:
-            core_available, core_disabled, core_unknown = core_measured
+            measured_core = core_measured
         else:
             _, core_available, core_disabled, core_unknown = _read_slots(
                 image_bgr, lines, MAJORS, core_label_y, grid, rows=1, band=band, columns=len(MAJORS)
             )
+            measured_core = (core_available, core_disabled, core_unknown)
+    grouped_core = _read_grouped_core(image_bgr, lines, add_title, h)
+    choices = [c for c in (measured_core, grouped_core) if c is not None]
+    if choices:
+        # max() keeps the first of equal scores, i.e. the title-anchored reading.
+        core_available, core_disabled, core_unknown = max(
+            choices, key=lambda c: len(c[0]) + len(c[1])
+        )
 
     minor_available: list[str] = []
     minor_disabled: list[str] = []
